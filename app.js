@@ -44,6 +44,10 @@ const elements = {
     categoryInput: document.getElementById('category-input'),
     addItemBtn: document.getElementById('add-item-btn'),
 
+    // Recent lists
+    recentListsDropdown: document.getElementById('recent-lists-dropdown'),
+    duplicateListBtn: document.getElementById('duplicate-list-btn'),
+
     // Buttons
     newListBtn: document.getElementById('new-list-btn'),
     archiveListBtn: document.getElementById('archive-list-btn'),
@@ -189,6 +193,7 @@ function setupEventListeners() {
     // List actions
     elements.newListBtn.addEventListener('click', startNewList);
     elements.archiveListBtn.addEventListener('click', archiveCurrentList);
+    elements.duplicateListBtn.addEventListener('click', duplicateSelectedList);
 
     // Settings
     elements.settingsBtn.addEventListener('click', () => {
@@ -510,10 +515,10 @@ async function loadFromDatabase() {
 
         state.frequentItems = frequentItems || [];
 
-        // Load archived lists
+        // Load archived lists with their items
         const { data: archivedLists, error: archivedError } = await window.supabase
             .from('grocery_lists')
-            .select('*')
+            .select('*, grocery_items(*)')
             .eq('user_id', state.currentUser.id)
             .eq('is_archived', true)
             .order('archived_at', { ascending: false })
@@ -521,11 +526,15 @@ async function loadFromDatabase() {
 
         if (archivedError) throw archivedError;
 
-        state.archivedLists = archivedLists || [];
+        state.archivedLists = (archivedLists || []).map(list => ({
+            ...list,
+            items: list.grocery_items || []
+        }));
 
         // Render UI
         renderItems();
         renderFrequentItems();
+        populateRecentListsDropdown();
         updateListTitle();
 
         // Set up real-time sync
@@ -561,6 +570,7 @@ async function loadFromLocalStorage() {
 
     renderItems();
     renderFrequentItems();
+    populateRecentListsDropdown();
     updateListTitle();
 }
 
@@ -766,6 +776,81 @@ function archiveListLocally() {
     state.archivedLists = state.archivedLists.slice(0, 20);
 
     saveToLocalStorage();
+}
+
+// ============================================================================
+// RECENT LISTS / DUPLICATE
+// ============================================================================
+
+function populateRecentListsDropdown() {
+    const dropdown = elements.recentListsDropdown;
+    dropdown.innerHTML = '<option value="">Recent lists...</option>';
+
+    const recentLists = state.archivedLists.slice(0, 5);
+    if (recentLists.length === 0) return;
+
+    recentLists.forEach((list, index) => {
+        const date = new Date(list.archived_at || list.created_at).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric'
+        });
+        const itemCount = list.items?.length || 0;
+        const option = document.createElement('option');
+        option.value = index;
+        option.textContent = `${list.name} (${date}) - ${itemCount} items`;
+        dropdown.appendChild(option);
+    });
+}
+
+async function duplicateSelectedList() {
+    const selectedIndex = elements.recentListsDropdown.value;
+    if (selectedIndex === '') {
+        showToast('Select a recent list to duplicate', 'warning');
+        return;
+    }
+
+    const sourceList = state.archivedLists[parseInt(selectedIndex)];
+    if (!sourceList || !sourceList.items || sourceList.items.length === 0) {
+        showToast('Selected list has no items', 'warning');
+        return;
+    }
+
+    // Archive current list if it has items
+    if (state.items.length > 0) {
+        if (!confirm('This will archive your current list and create a duplicate. Continue?')) {
+            return;
+        }
+        await archiveCurrentList();
+    }
+
+    // Create a new list without auto-adding frequent items
+    await createNewList(false);
+
+    // Copy items from the source list
+    for (const item of sourceList.items) {
+        const newItem = {
+            name: item.name,
+            quantity: item.quantity,
+            category: item.category,
+            is_checked: false,
+            created_at: new Date().toISOString()
+        };
+
+        if (window.supabase && state.currentUser && state.currentList?.id) {
+            await addItemToDatabase(newItem);
+        } else {
+            newItem.id = Date.now() + Math.random();
+            state.items.push(newItem);
+        }
+    }
+
+    if (!(window.supabase && state.currentUser)) {
+        saveToLocalStorage();
+    }
+
+    renderItems();
+    elements.recentListsDropdown.value = '';
+    showToast(`Duplicated "${sourceList.name}" with ${sourceList.items.length} items`, 'success');
 }
 
 // ============================================================================

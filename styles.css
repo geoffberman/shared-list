@@ -129,6 +129,31 @@ body {
     flex-wrap: wrap;
 }
 
+/* Recent Lists Bar */
+.recent-lists-bar {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    align-items: center;
+}
+
+.recent-lists-dropdown {
+    flex: 1;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    font-size: 0.9rem;
+    background: var(--card-bg);
+    color: var(--text-color);
+    cursor: pointer;
+}
+
+.recent-lists-dropdown:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(74, 124, 89, 0.15);
+}
+
 /* Add Item Form */
 .add-item-form {
     display: flex;
