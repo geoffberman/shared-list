@@ -267,6 +267,8 @@ function setupEventListeners() {
                 await signUp(email, password);
             } else {
                 await signIn(email, password);
+                // Hide modal immediately on successful sign-in
+                elements.authModal.classList.add('hidden');
             }
         } catch (error) {
             showError(error.message);
