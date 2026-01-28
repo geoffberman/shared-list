@@ -65,6 +65,221 @@
                         <input type="text" id="quantity-input" placeholder="Qty" class="quantity-input">
                         <select id="category-input" class="category-input">
                             <option value="">Category</option>
+                            <option value="bakery">🍞 Bakery</option>
+                            <option value="cheese">🧀 Cheese</option>
+                            <option value="meat">🥩 Meat</option>
+                            <option value="pantry">🥫 Pantry</option>
+                            <option value="dairy">🥛 Dairy</option>
+                            <option value="produce">🥬 Produce</option>
+                            <option value="frozen">❄️ Frozen</option>
+                            <option value="beverages">🥤 Beverages</option>
+                            <option value="snacks">🍿 Snacks</option>
+                            <option value="household">🧼 Household</option>
+                            <option value="other">📦 Other</option>
+                        </select>
+                        <button id="add-item-btn" class="btn btn-primary">Add</button>
+                    </div>
+
+                    <!-- Frequent Items Quick Add -->
+                    <div id="frequent-items-section" class="frequent-items hidden">
+                        <h3>Frequent Items</h3>
+                        <div id="frequent-items-list" class="frequent-items-list"></div>
+                    </div>
+
+                    <!-- Grocery Items List -->
+                    <div id="items-list" class="items-list">
+                        <p class="empty-state">Your list is empty. Add some items to get started!</p>
+                    </div>
+
+                    <!-- List Stats -->
+                    <div id="list-stats" class="list-stats hidden">
+                        <span id="total-items">0 items</span>
+                        <span id="checked-items">0 checked</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Archived Lists Section -->
+            <section id="archived-lists-section" class="section hidden">
+                <div class="container">
+                    <div class="section-header">
+                        <h2>Shopping History</h2>
+                        <button id="close-history-btn" class="btn btn-secondary">← Back to Current List</button>
+                    </div>
+                    <div id="archived-lists" class="archived-lists"></div>
+                </div>
+            </section>
+
+            <!-- Settings Modal -->
+            <div id="settings-modal" class="modal hidden">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>Settings</h2>
+                        <button id="close-settings-btn" class="btn-close">×</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="settings-section">
+                            <h3>SMS Integration</h3>
+                            <p class="help-text">Text items to this number with "Grocery list:" followed by items</p>
+                            <div class="integration-info">
+                                <code id="sms-number">+1 (555) 123-4567</code>
+                                <p class="help-text">Example: "Grocery list: milk, bread, eggs"</p>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h3>Email Integration</h3>
+                            <p class="help-text">Email your list to this address</p>
+                            <div class="integration-info">
+                                <code id="email-address">grocery@yourdomain.com</code>
+                                <p class="help-text">Subject: "Grocery list" | Body: list of items</p>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h3>Family Members</h3>
+                            <p class="help-text">Share this link with family members to collaborate</p>
+                            <div class="share-link">
+                                <input type="text" id="share-link" readonly value="">
+                                <button id="copy-link-btn" class="btn btn-secondary">📋 Copy</button>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h3>Preferences</h3>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="auto-add-frequent">
+                                <span>Auto-add frequent items to new lists</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="group-by-category">
+                                <span>Group items by category</span>
+                            </label>
+                        </div>
+
+                        <div class="settings-section">
+                            <h3>Data Management</h3>
+                            <button id="view-history-btn" class="btn btn-secondary">📊 View Shopping History</button>
+                            <button id="clear-frequent-btn" class="btn btn-secondary">🗑️ Clear Frequent Items</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Auth Modal -->
+            <div id="auth-modal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>Sign In to Sync Across Devices</h2>
+                    </div>
+                    <div class="modal-body">
+                        <div id="auth-tabs" class="auth-tabs">
+                            <button id="sign-in-tab" class="auth-tab active">Sign In</button>
+                            <button id="sign-up-tab" class="auth-tab">Sign Up</button>
+                        </div>
+
+                        <form id="auth-form" class="auth-form">
+                            <div class="form-group">
+                                <label for="email">Email</label>
+                                <input type="email" id="email" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="password">Password</label>
+                                <input type="password" id="password" required>
+                            </div>
+                            <div id="error-message" class="error-message hidden"></div>
+                            <button type="submit" id="auth-submit-btn" class="btn btn-primary">Sign In</button>
+                        </form>
+
+                        <div class="auth-footer">
+                            <button id="skip-auth-btn" class="btn-link">Continue without signing in</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Edit Item Modal -->
+            <div id="edit-modal" class="modal hidden">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>Edit Item</h2>
+                        <button id="close-edit-btn" class="btn-close">×</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label for="edit-item-name">Item Name</label>
+                            <input type="text" id="edit-item-name" class="item-input" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-item-quantity">Quantity</label>
+                            <input type="text" id="edit-item-quantity" class="quantity-input">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-item-category">Category</label>
+                            <select id="edit-item-category" class="category-input">
+                                <option value="">No Category</option>
+                                <option value="bakery">🍞 Bakery</option>
+                                <option value="cheese">🧀 Cheese</option>
+                                <option value="meat">🥩 Meat</option>
+                                <option value="pantry">🥫 Pantry</option>
+                                <option value="dairy">🥛 Dairy</option>
+                                <option value="produce">🥬 Produce</option>
+                                <option value="frozen">❄️ Frozen</option>
+                                <option value="beverages">🥤 Beverages</option>
+                                <option value="snacks">🍿 Snacks</option>
+                                <option value="household">🧼 Household</option>
+                                <option value="other">📦 Other</option>
+                            </select>
+                        </div>
+                        <button id="save-edit-btn" class="btn btn-primary">Save Changes</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>Made with ❤️ for the Berman family</p>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="supabase-client.js"></script>
+    <script src="../auth.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
+                    <button id="settings-btn" class="btn-icon" title="Settings">⚙️</button>
+                    <div id="user-profile" class="user-profile hidden">
+                        <button id="user-menu-btn" class="btn-icon">👤</button>
+                        <div id="user-menu" class="dropdown-menu hidden">
+                            <div id="user-email" class="user-email"></div>
+                            <button id="sign-out-btn" class="btn btn-secondary">Sign Out</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Current List Section -->
+            <section id="current-list-section" class="section">
+                <div class="container">
+                    <div class="list-header">
+                        <h2 id="list-title">Current List</h2>
+                        <div class="list-actions">
+                            <button id="new-list-btn" class="btn btn-primary">📝 Start New List</button>
+                            <button id="archive-list-btn" class="btn btn-secondary">📦 Archive & Clear</button>
+                        </div>
+                    </div>
+
+                    <!-- Add Item Form -->
+                    <div class="add-item-form">
+                        <input type="text" id="item-input" placeholder="Add an item..." class="item-input">
+                        <input type="text" id="quantity-input" placeholder="Qty" class="quantity-input">
+                        <select id="category-input" class="category-input">
+                            <option value="">Category</option>
                             <option value="produce">🥬 Produce</option>
                             <option value="dairy">🥛 Dairy</option>
                             <option value="meat">🥩 Meat</option>
