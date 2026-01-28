@@ -1,0 +1,35 @@
+{
+  "name": "Shared List",
+  "short_name": "Shared List",
+  "description": "Collaborative shopping list for the Berman family",
+  "start_url": "/grocery/",
+  "display": "standalone",
+  "background_color": "#FAF7F2",
+  "theme_color": "#4A7C59",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛒</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛒</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["shopping", "utilities", "lifestyle"],
+  "screenshots": [],
+  "share_target": {
+    "action": "/grocery/share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text"
+    }
+  }
+}
