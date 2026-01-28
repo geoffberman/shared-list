@@ -14,7 +14,8 @@ const state = {
     settings: {
         autoAddFrequent: true,
         groupByCategory: false
-    }
+    },
+    realtimeSubscription: null
 };
 
 // ============================================================================
@@ -84,7 +85,10 @@ const elements = {
     errorMessage: document.getElementById('error-message'),
 
     // Archived lists
-    archivedLists: document.getElementById('archived-lists')
+    archivedLists: document.getElementById('archived-lists'),
+
+    // Toast container
+    toastContainer: document.getElementById('toast-container')
 };
 
 // ============================================================================
@@ -103,6 +107,9 @@ async function init() {
     // Set share link
     elements.shareLink.value = window.location.href;
 
+    // Register service worker
+    registerServiceWorker();
+
     // Check authentication state
     if (window.supabase) {
         const { data: { session } } = await window.supabase.auth.getSession();
@@ -110,7 +117,6 @@ async function init() {
             handleAuthStateChange(session);
             elements.authModal.classList.add('hidden');
         } else {
-            // Show auth modal
             const skipAuth = localStorage.getItem('skipAuth');
             if (skipAuth === 'true') {
                 elements.authModal.classList.add('hidden');
@@ -138,6 +144,21 @@ async function init() {
 }
 
 // ============================================================================
+// SERVICE WORKER
+// ============================================================================
+
+async function registerServiceWorker() {
+    if ('serviceWorker' in navigator) {
+        try {
+            const registration = await navigator.serviceWorker.register('sw.js');
+            console.log('Service Worker registered:', registration.scope);
+        } catch (error) {
+            console.log('Service Worker registration failed:', error);
+        }
+    }
+}
+
+// ============================================================================
 // EVENT LISTENERS
 // ============================================================================
 
@@ -155,14 +176,13 @@ function setupEventListeners() {
             const suggestedCategory = autoCategorize(itemName);
             if (suggestedCategory) {
                 elements.categoryInput.value = suggestedCategory;
-                // Add visual hint that it's auto-suggested (user can still change it)
                 elements.categoryInput.style.fontStyle = 'italic';
             }
         }
     });
 
     // Reset font style when user manually changes category
-    elements.categoryInput.addEventListener('change', (e) => {
+    elements.categoryInput.addEventListener('change', () => {
         elements.categoryInput.style.fontStyle = 'normal';
     });
 
@@ -201,12 +221,15 @@ function setupEventListeners() {
 
     // Share link
     elements.copyLinkBtn.addEventListener('click', () => {
-        elements.shareLink.select();
-        document.execCommand('copy');
-        elements.copyLinkBtn.textContent = '✓ Copied!';
-        setTimeout(() => {
-            elements.copyLinkBtn.textContent = '📋 Copy';
-        }, 2000);
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(elements.shareLink.value).then(() => {
+                showToast('Link copied!', 'success');
+            });
+        } else {
+            elements.shareLink.select();
+            document.execCommand('copy');
+            showToast('Link copied!', 'success');
+        }
     });
 
     // Auth
@@ -262,6 +285,44 @@ function setupEventListeners() {
             elements.userMenu?.classList.add('hidden');
         }
     });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            elements.settingsModal.classList.add('hidden');
+            closeEditModal();
+        }
+    });
+
+    // Online/offline detection
+    window.addEventListener('online', () => {
+        showToast('Back online', 'success');
+        if (state.currentUser) {
+            loadFromDatabase();
+        }
+    });
+    window.addEventListener('offline', () => {
+        showToast('You are offline. Changes will sync when reconnected.', 'warning');
+    });
+}
+
+// ============================================================================
+// TOAST NOTIFICATIONS
+// ============================================================================
+
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+
+    elements.toastContainer.appendChild(toast);
+
+    // Remove after animation
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.parentNode.removeChild(toast);
+        }
+    }, 3000);
 }
 
 // ============================================================================
@@ -276,7 +337,6 @@ async function signUp(email, password) {
 
     if (error) throw error;
 
-    // Show success message
     showError('Check your email to confirm your account!', 'success');
 }
 
@@ -306,6 +366,12 @@ function handleSignOut() {
     state.currentUser = null;
     elements.userProfile.classList.add('hidden');
 
+    // Unsubscribe from realtime
+    if (state.realtimeSubscription) {
+        state.realtimeSubscription.unsubscribe();
+        state.realtimeSubscription = null;
+    }
+
     // Clear state and reload from localStorage
     state.currentList = null;
     state.items = [];
@@ -313,16 +379,82 @@ function handleSignOut() {
     state.archivedLists = [];
 
     loadFromLocalStorage();
+    showToast('Signed out', 'info');
 }
 
 function showError(message, type = 'error') {
     elements.errorMessage.textContent = message;
     elements.errorMessage.classList.remove('hidden');
     elements.errorMessage.style.color = type === 'success' ? '#4A7C59' : '#C74B50';
+    elements.errorMessage.style.background = type === 'success' ? '#e8f5e9' : '';
 
     setTimeout(() => {
         elements.errorMessage.classList.add('hidden');
     }, 5000);
+}
+
+// ============================================================================
+// REAL-TIME SYNC
+// ============================================================================
+
+function setupRealtimeSubscription() {
+    if (!window.supabase || !state.currentUser || !state.currentList?.id) return;
+
+    // Unsubscribe from previous subscription
+    if (state.realtimeSubscription) {
+        state.realtimeSubscription.unsubscribe();
+    }
+
+    state.realtimeSubscription = window.supabase
+        .channel('grocery-items-changes')
+        .on(
+            'postgres_changes',
+            {
+                event: '*',
+                schema: 'public',
+                table: 'grocery_items',
+                filter: `list_id=eq.${state.currentList.id}`
+            },
+            (payload) => {
+                handleRealtimeChange(payload);
+            }
+        )
+        .subscribe();
+}
+
+function handleRealtimeChange(payload) {
+    const { eventType, new: newRecord, old: oldRecord } = payload;
+
+    switch (eventType) {
+        case 'INSERT': {
+            // Only add if we don't already have it (avoid duplicates from our own inserts)
+            if (!state.items.find(i => i.id === newRecord.id)) {
+                state.items.push(newRecord);
+                renderItems();
+                showToast(`${newRecord.name} added to list`, 'success');
+            }
+            break;
+        }
+        case 'UPDATE': {
+            const index = state.items.findIndex(i => i.id === newRecord.id);
+            if (index >= 0) {
+                state.items[index] = newRecord;
+                renderItems();
+            }
+            break;
+        }
+        case 'DELETE': {
+            const deleteId = oldRecord?.id;
+            if (deleteId) {
+                state.items = state.items.filter(i => i.id !== deleteId);
+                renderItems();
+            }
+            break;
+        }
+    }
+
+    // Keep localStorage in sync
+    saveToLocalStorage();
 }
 
 // ============================================================================
@@ -394,9 +526,14 @@ async function loadFromDatabase() {
         renderFrequentItems();
         updateListTitle();
 
+        // Set up real-time sync
+        setupRealtimeSubscription();
+
+        // Save to localStorage as cache
+        saveToLocalStorage();
+
     } catch (error) {
         console.error('Error loading from database:', error);
-        // Fallback to localStorage
         loadFromLocalStorage();
     }
 }
@@ -425,7 +562,7 @@ async function loadFromLocalStorage() {
     updateListTitle();
 }
 
-async function saveToLocalStorage() {
+function saveToLocalStorage() {
     const data = {
         currentList: state.currentList,
         items: state.items,
@@ -433,16 +570,6 @@ async function saveToLocalStorage() {
         archivedLists: state.archivedLists
     };
     localStorage.setItem('groceryListData', JSON.stringify(data));
-}
-
-async function saveToDatabase() {
-    if (!window.supabase || !state.currentUser) {
-        return saveToLocalStorage();
-    }
-
-    // Database saves are handled individually in each action
-    // This is just a fallback
-    saveToLocalStorage();
 }
 
 // ============================================================================
@@ -495,6 +622,7 @@ async function createNewList(autoAddFrequent = true) {
             if (error) throw error;
 
             state.currentList = data;
+            state.items = [];
 
             // Auto-add frequent items if enabled
             if (autoAddFrequent && state.settings.autoAddFrequent && state.frequentItems.length > 0) {
@@ -507,9 +635,11 @@ async function createNewList(autoAddFrequent = true) {
                 }
             }
 
+            // Set up real-time for new list
+            setupRealtimeSubscription();
+
         } catch (error) {
             console.error('Error creating list in database:', error);
-            // Fallback to localStorage
             state.currentList = newList;
             if (autoAddFrequent && state.settings.autoAddFrequent) {
                 state.items = state.frequentItems.slice(0, 5).map(item => ({
@@ -554,17 +684,17 @@ async function startNewList() {
     }
 
     await createNewList(true);
+    showToast('New list created', 'success');
 }
 
 async function archiveCurrentList() {
     if (!state.currentList || state.items.length === 0) {
-        alert('Nothing to archive!');
+        showToast('Nothing to archive', 'warning');
         return;
     }
 
     if (window.supabase && state.currentUser && state.currentList.id) {
         try {
-            // Archive the list in database
             const { error } = await window.supabase
                 .from('grocery_lists')
                 .update({
@@ -575,9 +705,6 @@ async function archiveCurrentList() {
 
             if (error) throw error;
 
-            // The trigger will automatically update frequent_items
-
-            // Add to archived lists
             state.archivedLists.unshift({
                 ...state.currentList,
                 is_archived: true,
@@ -585,7 +712,6 @@ async function archiveCurrentList() {
                 items: [...state.items]
             });
 
-            // Reload frequent items
             await loadFromDatabase();
 
         } catch (error) {
@@ -596,8 +722,8 @@ async function archiveCurrentList() {
         archiveListLocally();
     }
 
-    // Create new list
     await createNewList(true);
+    showToast('List archived', 'success');
 }
 
 function archiveListLocally() {
@@ -677,7 +803,10 @@ async function addItem() {
     elements.itemInput.value = '';
     elements.quantityInput.value = '';
     elements.categoryInput.value = '';
+    elements.categoryInput.style.fontStyle = 'normal';
     elements.itemInput.focus();
+
+    showToast(`Added "${name}"`, 'success');
 }
 
 async function addItemToDatabase(item) {
@@ -699,10 +828,10 @@ async function addItemToDatabase(item) {
 
         state.items.push(data);
         renderItems();
+        saveToLocalStorage();
 
     } catch (error) {
         console.error('Error adding item to database:', error);
-        // Fallback to local
         item.id = Date.now() + Math.random();
         state.items.push(item);
         saveToLocalStorage();
@@ -711,7 +840,7 @@ async function addItemToDatabase(item) {
 }
 
 async function toggleItem(itemId) {
-    const item = state.items.find(i => i.id === itemId);
+    const item = state.items.find(i => i.id == itemId);
     if (!item) return;
 
     item.is_checked = !item.is_checked;
@@ -740,6 +869,9 @@ async function toggleItem(itemId) {
 }
 
 async function deleteItem(itemId) {
+    const item = state.items.find(i => i.id == itemId);
+    const itemName = item ? item.name : '';
+
     if (window.supabase && state.currentUser && state.currentList?.id) {
         try {
             const { error } = await window.supabase
@@ -749,26 +881,31 @@ async function deleteItem(itemId) {
 
             if (error) throw error;
 
-            state.items = state.items.filter(i => i.id !== itemId);
+            state.items = state.items.filter(i => i.id != itemId);
             renderItems();
+            saveToLocalStorage();
 
         } catch (error) {
             console.error('Error deleting item:', error);
-            state.items = state.items.filter(i => i.id !== itemId);
+            state.items = state.items.filter(i => i.id != itemId);
             saveToLocalStorage();
             renderItems();
         }
     } else {
-        state.items = state.items.filter(i => i.id !== itemId);
+        state.items = state.items.filter(i => i.id != itemId);
         saveToLocalStorage();
         renderItems();
+    }
+
+    if (itemName) {
+        showToast(`Removed "${itemName}"`, 'info');
     }
 }
 
 let currentEditItemId = null;
 
 function openEditModal(itemId) {
-    const item = state.items.find(i => i.id === itemId);
+    const item = state.items.find(i => i.id == itemId);
     if (!item) return;
 
     currentEditItemId = itemId;
@@ -787,7 +924,7 @@ function closeEditModal() {
 async function saveEditedItem() {
     if (!currentEditItemId) return;
 
-    const item = state.items.find(i => i.id === currentEditItemId);
+    const item = state.items.find(i => i.id == currentEditItemId);
     if (!item) return;
 
     const newName = elements.editItemName.value.trim();
@@ -795,7 +932,7 @@ async function saveEditedItem() {
     const newCategory = elements.editItemCategory.value;
 
     if (!newName) {
-        alert('Item name cannot be empty');
+        showToast('Item name cannot be empty', 'error');
         return;
     }
 
@@ -826,9 +963,16 @@ async function saveEditedItem() {
 
     closeEditModal();
     renderItems();
+    showToast('Item updated', 'success');
 }
 
 async function addFrequentItem(itemName, category, quantity) {
+    // Check if already in list
+    if (state.items.find(i => i.name.toLowerCase() === itemName.toLowerCase())) {
+        showToast(`"${itemName}" is already in your list`, 'warning');
+        return;
+    }
+
     const newItem = {
         name: itemName,
         quantity: quantity,
@@ -845,6 +989,8 @@ async function addFrequentItem(itemName, category, quantity) {
         saveToLocalStorage();
         renderItems();
     }
+
+    showToast(`Added "${itemName}"`, 'success');
 }
 
 async function clearFrequentItems() {
@@ -875,48 +1021,118 @@ async function clearFrequentItems() {
         saveToLocalStorage();
         renderFrequentItems();
     }
+
+    showToast('Frequent items cleared', 'success');
 }
+
+// ============================================================================
+// SWIPE TO DELETE (Mobile)
+// ============================================================================
+
+function setupSwipeHandlers() {
+    const items = document.querySelectorAll('.item');
+    items.forEach(itemEl => {
+        let startX = 0;
+        let currentX = 0;
+        let isSwiping = false;
+
+        itemEl.addEventListener('touchstart', (e) => {
+            startX = e.touches[0].clientX;
+            isSwiping = false;
+        }, { passive: true });
+
+        itemEl.addEventListener('touchmove', (e) => {
+            currentX = e.touches[0].clientX;
+            const diff = startX - currentX;
+
+            if (diff > 10) {
+                isSwiping = true;
+                itemEl.classList.add('swiping');
+                const translateX = Math.min(diff, 80);
+                itemEl.style.transform = `translateX(-${translateX}px)`;
+            }
+        }, { passive: true });
+
+        itemEl.addEventListener('touchend', () => {
+            const diff = startX - currentX;
+
+            if (isSwiping && diff > 60) {
+                // Swipe threshold met - delete
+                const itemId = itemEl.querySelector('.item-checkbox')?.dataset.itemId;
+                if (itemId) {
+                    itemEl.classList.add('removing');
+                    setTimeout(() => deleteItem(itemId), 300);
+                }
+            } else {
+                // Reset position
+                itemEl.classList.remove('swiping');
+                itemEl.style.transform = '';
+            }
+
+            isSwiping = false;
+        }, { passive: true });
+    });
+}
+
 // ============================================================================
 // AUTO-CATEGORIZATION
 // ============================================================================
 
 function autoCategorize(itemName) {
     const name = itemName.toLowerCase();
-    
+
     // Bakery
     if (/bread|bun|roll|bagel|croissant|muffin|donut|cake|cookie|pastry|biscuit|scone|waffle|pancake|tortilla|pita/.test(name)) {
         return 'bakery';
     }
-    
+
     // Cheese
     if (/cheese|cheddar|mozzarella|parmesan|brie|feta|gouda|swiss|provolone/.test(name)) {
         return 'cheese';
     }
-    
+
     // Meat
     if (/chicken|beef|pork|fish|turkey|lamb|meat|steak|bacon|sausage|ham|salmon|tuna|shrimp/.test(name)) {
         return 'meat';
     }
-    
+
     // Pantry/Canned goods
-    if (/can|rice|pasta|bean|soup|sauce|oil|vinegar|spice|flour|sugar|salt|pepper|cereal|oat|jar/.test(name)) {
+    if (/can|rice|pasta|bean|soup|sauce|oil|vinegar|spice|flour|sugar|salt|pepper|cereal|oat|jar|noodle/.test(name)) {
         return 'pantry';
     }
-    
+
     // Dairy
     if (/milk|yogurt|butter|cream|egg/.test(name)) {
         return 'dairy';
     }
-    
+
     // Produce
-    if (/apple|banana|orange|grape|berry|lettuce|tomato|potato|onion|carrot|celery|spinach|kale|broccoli|cucumber|pepper|fruit|vegetable|avocado|lemon|lime/.test(name)) {
+    if (/apple|banana|orange|grape|berry|lettuce|tomato|potato|onion|carrot|celery|spinach|kale|broccoli|cucumber|pepper|fruit|vegetable|avocado|lemon|lime|garlic|mushroom|zucchini|squash|corn|pea/.test(name)) {
         return 'produce';
     }
-    
+
+    // Frozen
+    if (/frozen|ice cream|pizza|fries|popsicle/.test(name)) {
+        return 'frozen';
+    }
+
+    // Beverages
+    if (/water|juice|soda|coffee|tea|wine|beer|kombucha|drink|sparkling/.test(name)) {
+        return 'beverages';
+    }
+
+    // Snacks
+    if (/chip|cracker|nut|popcorn|pretzel|trail mix|granola|candy|chocolate/.test(name)) {
+        return 'snacks';
+    }
+
+    // Household
+    if (/soap|detergent|paper|towel|tissue|trash|bag|sponge|cleaner|bleach|wrap|foil|plastic/.test(name)) {
+        return 'household';
+    }
+
     return '';
 }
-
-
 
 // ============================================================================
 // UI RENDERING
@@ -937,7 +1153,7 @@ function renderItems() {
 
     let itemsToRender = [...state.items];
 
-    // Always group by category with custom order: bakery, cheese, meat, pantry, dairy, produce, then others
+    // Always group by category
     const categoryOrder = ['bakery', 'cheese', 'meat', 'pantry', 'dairy', 'produce', 'frozen', 'beverages', 'snacks', 'household', 'other'];
     const categories = {};
     categoryOrder.forEach(cat => {
@@ -953,25 +1169,24 @@ function renderItems() {
         }
     });
 
+    const categoryEmoji = {
+        'bakery': '🍞',
+        'cheese': '🧀',
+        'meat': '🥩',
+        'pantry': '🥫',
+        'dairy': '🥛',
+        'produce': '🥬',
+        'frozen': '❄️',
+        'beverages': '🥤',
+        'snacks': '🍿',
+        'household': '🧼',
+        'other': '📦'
+    };
+
     let html = '';
-    // Render in custom order
     categoryOrder.forEach(category => {
         const items = categories[category];
         if (items && items.length > 0) {
-            const categoryEmoji = {
-                'bakery': '🍞',
-                'cheese': '🧀',
-                'meat': '🥩',
-                'pantry': '🥫',
-                'dairy': '🥛',
-                'produce': '🥬',
-                'frozen': '❄️',
-                'beverages': '🥤',
-                'snacks': '🍿',
-                'household': '🧼',
-                'other': '📦'
-            };
-
             html += `<div class="category-group">
                 <h3 class="category-title">${categoryEmoji[category]} ${category.charAt(0).toUpperCase() + category.slice(1)}</h3>
                 ${items.map(renderItemHTML).join('')}
@@ -988,27 +1203,37 @@ function renderItems() {
     elements.checkedItems.textContent = `${checked} checked`;
     elements.listStats.classList.remove('hidden');
 
-    // Add event listeners to checkboxes, edit buttons, and delete buttons
+    // Add progress bar
+    const progressPercent = total > 0 ? Math.round((checked / total) * 100) : 0;
+    const existingProgress = elements.listStats.querySelector('.list-progress');
+    if (!existingProgress) {
+        const progressHtml = `<div class="list-progress"><div class="list-progress-bar" style="width: ${progressPercent}%"></div></div>`;
+        elements.listStats.insertAdjacentHTML('beforeend', progressHtml);
+    } else {
+        existingProgress.querySelector('.list-progress-bar').style.width = `${progressPercent}%`;
+    }
+
+    // Add event listeners
     document.querySelectorAll('.item-checkbox').forEach(checkbox => {
         checkbox.addEventListener('change', (e) => {
-            const itemId = e.target.dataset.itemId;
-            toggleItem(itemId);
+            toggleItem(e.target.dataset.itemId);
         });
     });
 
     document.querySelectorAll('.edit-item-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            const itemId = e.target.dataset.itemId;
-            openEditModal(itemId);
+            openEditModal(e.currentTarget.dataset.itemId);
         });
     });
 
     document.querySelectorAll('.delete-item-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            const itemId = e.target.dataset.itemId;
-            deleteItem(itemId);
+            deleteItem(e.currentTarget.dataset.itemId);
         });
     });
+
+    // Setup swipe handlers for mobile
+    setupSwipeHandlers();
 }
 
 function renderItemHTML(item) {
@@ -1026,6 +1251,7 @@ function renderItemHTML(item) {
                 <button class="edit-item-btn" data-item-id="${item.id}" title="Edit">✏️</button>
                 <button class="delete-item-btn" data-item-id="${item.id}" title="Delete">🗑️</button>
             </div>
+            <div class="item-swipe-bg">🗑️</div>
         </div>
     `;
 }
@@ -1044,7 +1270,7 @@ function renderFrequentItems() {
                 data-category="${item.category || ''}"
                 data-quantity="${item.typical_quantity || ''}">
             ${escapeHtml(item.name)}
-            ${item.frequency_count > 1 ? `<span class="frequency-badge">${item.frequency_count}×</span>` : ''}
+            ${item.frequency_count > 1 ? `<span class="frequency-badge">${item.frequency_count}x</span>` : ''}
         </button>
     `).join('');
 
@@ -1053,9 +1279,10 @@ function renderFrequentItems() {
     // Add event listeners
     document.querySelectorAll('.frequent-item-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            const name = e.target.dataset.name;
-            const category = e.target.dataset.category;
-            const quantity = e.target.dataset.quantity;
+            const target = e.target.closest('.frequent-item-btn');
+            const name = target.dataset.name;
+            const category = target.dataset.category;
+            const quantity = target.dataset.quantity;
             addFrequentItem(name, category, quantity);
         });
     });
@@ -1063,7 +1290,6 @@ function renderFrequentItems() {
 
 async function showArchivedLists() {
     if (window.supabase && state.currentUser) {
-        // Reload from database
         try {
             const { data, error } = await window.supabase
                 .from('grocery_lists')
@@ -1086,7 +1312,7 @@ async function showArchivedLists() {
     }
 
     if (state.archivedLists.length === 0) {
-        alert('No archived lists yet!');
+        showToast('No archived lists yet', 'info');
         return;
     }
 
@@ -1120,6 +1346,7 @@ async function showArchivedLists() {
     elements.archivedLists.innerHTML = html;
     elements.currentListSection.classList.add('hidden');
     elements.archivedListsSection.classList.remove('hidden');
+    elements.settingsModal.classList.add('hidden');
 }
 
 // ============================================================================
@@ -1127,6 +1354,7 @@ async function showArchivedLists() {
 // ============================================================================
 
 function escapeHtml(text) {
+    if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
