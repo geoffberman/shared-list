@@ -777,6 +777,47 @@ async function clearFrequentItems() {
         renderFrequentItems();
     }
 }
+// ============================================================================
+// AUTO-CATEGORIZATION
+// ============================================================================
+
+function autoCategorize(itemName) {
+    const name = itemName.toLowerCase();
+    
+    // Bakery
+    if (/bread|bun|roll|bagel|croissant|muffin|donut|cake|cookie|pastry|biscuit|scone|waffle|pancake|tortilla|pita/.test(name)) {
+        return 'bakery';
+    }
+    
+    // Cheese
+    if (/cheese|cheddar|mozzarella|parmesan|brie|feta|gouda|swiss|provolone/.test(name)) {
+        return 'cheese';
+    }
+    
+    // Meat
+    if (/chicken|beef|pork|fish|turkey|lamb|meat|steak|bacon|sausage|ham|salmon|tuna|shrimp/.test(name)) {
+        return 'meat';
+    }
+    
+    // Pantry/Canned goods
+    if (/can|rice|pasta|bean|soup|sauce|oil|vinegar|spice|flour|sugar|salt|pepper|cereal|oat|jar/.test(name)) {
+        return 'pantry';
+    }
+    
+    // Dairy
+    if (/milk|yogurt|butter|cream|egg/.test(name)) {
+        return 'dairy';
+    }
+    
+    // Produce
+    if (/apple|banana|orange|grape|berry|lettuce|tomato|potato|onion|carrot|celery|spinach|kale|broccoli|cucumber|pepper|fruit|vegetable|avocado|lemon|lime/.test(name)) {
+        return 'produce';
+    }
+    
+    return '';
+}
+
+
 
 // ============================================================================
 // UI RENDERING
