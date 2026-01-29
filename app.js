@@ -1000,25 +1000,112 @@ async function duplicateSelectedList() {
 // ADD COMMON ITEMS
 // ============================================================================
 
+function getCommonItemsFromHistory() {
+    const archived = state.archivedLists || [];
+    const commonItems = new Map(); // name (lowercase) -> { name, category, quantity }
+
+    // Check: appeared on 2 of the last 3 lists
+    const last3 = archived.slice(0, 3);
+    if (last3.length >= 2) {
+        const itemCounts = {};
+        last3.forEach(list => {
+            const items = list.items || list.grocery_items || [];
+            const seen = new Set();
+            items.forEach(item => {
+                const key = item.name.toLowerCase();
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    itemCounts[key] = (itemCounts[key] || 0) + 1;
+                }
+            });
+        });
+        // Items on 2+ of last 3
+        for (const [key, count] of Object.entries(itemCounts)) {
+            if (count >= 2) {
+                const source = last3.flatMap(l => l.items || l.grocery_items || [])
+                    .find(i => i.name.toLowerCase() === key);
+                if (source) {
+                    commonItems.set(key, {
+                        name: source.name,
+                        category: source.category || autoCategorize(source.name),
+                        quantity: source.quantity || ''
+                    });
+                }
+            }
+        }
+    }
+
+    // Check: appeared on 4 of the last 10 lists
+    const last10 = archived.slice(0, 10);
+    if (last10.length >= 4) {
+        const itemCounts = {};
+        last10.forEach(list => {
+            const items = list.items || list.grocery_items || [];
+            const seen = new Set();
+            items.forEach(item => {
+                const key = item.name.toLowerCase();
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    itemCounts[key] = (itemCounts[key] || 0) + 1;
+                }
+            });
+        });
+        // Items on 4+ of last 10
+        for (const [key, count] of Object.entries(itemCounts)) {
+            if (count >= 4 && !commonItems.has(key)) {
+                const source = last10.flatMap(l => l.items || l.grocery_items || [])
+                    .find(i => i.name.toLowerCase() === key);
+                if (source) {
+                    commonItems.set(key, {
+                        name: source.name,
+                        category: source.category || autoCategorize(source.name),
+                        quantity: source.quantity || ''
+                    });
+                }
+            }
+        }
+    }
+
+    return Array.from(commonItems.values());
+}
+
 async function addCommonItems() {
-    if (state.frequentItems.length === 0) {
+    // Combine frequency-based items and recency-based items
+    const recencyItems = getCommonItemsFromHistory();
+    const frequencyItems = state.frequentItems.slice(0, 10).map(fi => ({
+        name: fi.name,
+        category: fi.category || '',
+        quantity: fi.typical_quantity || ''
+    }));
+
+    // Merge: recency items first, then frequency items not already included
+    const merged = new Map();
+    recencyItems.forEach(item => merged.set(item.name.toLowerCase(), item));
+    frequencyItems.forEach(item => {
+        if (!merged.has(item.name.toLowerCase())) {
+            merged.set(item.name.toLowerCase(), item);
+        }
+    });
+
+    const itemsToAdd = Array.from(merged.values());
+
+    if (itemsToAdd.length === 0) {
         showToast('No common items yet. Shop more to build your frequent items list!', 'info');
         return;
     }
 
-    const itemsToAdd = state.frequentItems.slice(0, 10);
     let addedCount = 0;
 
-    for (const freqItem of itemsToAdd) {
+    for (const commonItem of itemsToAdd) {
         // Skip if already on list
-        if (state.items.find(i => i.name.toLowerCase() === freqItem.name.toLowerCase())) {
+        if (state.items.find(i => i.name.toLowerCase() === commonItem.name.toLowerCase())) {
             continue;
         }
 
         const newItem = {
-            name: freqItem.name,
-            quantity: freqItem.typical_quantity || '',
-            category: freqItem.category || '',
+            name: commonItem.name,
+            quantity: commonItem.quantity,
+            category: commonItem.category || autoCategorize(commonItem.name),
             notes: '',
             is_checked: false,
             created_at: new Date().toISOString()
