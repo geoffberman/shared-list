@@ -579,7 +579,12 @@ async function loadFromDatabase() {
 
             if (itemsError) throw itemsError;
 
-            state.items = items || [];
+            state.items = (items || []).map(item => {
+                if (!item.category) {
+                    item.category = autoCategorize(item.name);
+                }
+                return item;
+            });
         } else {
             // Create a new list
             await createNewList();
@@ -1525,12 +1530,12 @@ function autoCategorize(itemName) {
     }
 
     // Meat
-    if (/chicken|beef|pork|fish|turkey|lamb|meat|steak|bacon|sausage|ham|salmon|tuna|shrimp/.test(name)) {
+    if (/chicken|beef|pork|fish|turkey|lamb|meat|steak|bacon|sausage|hamburger|ham\b|salmon|tuna|shrimp|ribs?\b|roast|brisket|chop|wing|thigh|breast|drumstick|ground\b|hot dog|bratwurst|jerky|veal|venison/.test(name)) {
         return 'meat';
     }
 
     // Pantry/Canned goods
-    if (/can|rice|pasta|bean|soup|sauce|oil|vinegar|spice|flour|sugar|salt|pepper|cereal|oat|jar|noodle/.test(name)) {
+    if (/rice|pasta|bean|soup|sauce|oil\b|vinegar|spice|flour|sugar|salt\b|pepper|cereal|oat|jar|noodle|pickle|canned|broth|ketchup|mustard|mayo|honey|syrup|peanut butter|jelly|jam/.test(name)) {
         return 'pantry';
     }
 
@@ -1540,7 +1545,7 @@ function autoCategorize(itemName) {
     }
 
     // Produce
-    if (/apple|banana|orange|grape|berry|lettuce|tomato|potato|onion|carrot|celery|spinach|kale|broccoli|cucumber|pepper|fruit|vegetable|avocado|lemon|lime|garlic|mushroom|zucchini|squash|corn|pea/.test(name)) {
+    if (/apple|banana|orange|grape|berry|lettuce|tomato|potato|onion|carrot|celery|spinach|kale|broccoli|cucumber|bell pepper|jalape|fruit|vegetable|avocado|lemon|lime|garlic|mushroom|zucchini|squash|corn\b|peas?\b|peach|pear\b|plum|mango|melon|watermelon|cantaloupe|pineapple|cherry|cabbage|cauliflower|asparagus|radish|beet|turnip|herb|cilantro|parsley|basil|ginger|green onion|scallion/.test(name)) {
         return 'produce';
     }
 
