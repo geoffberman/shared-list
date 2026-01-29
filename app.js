@@ -31,6 +31,7 @@ const elements = {
 
     // List elements
     listTitle: document.getElementById('list-title'),
+    editTitleBtn: document.getElementById('edit-title-btn'),
     itemsList: document.getElementById('items-list'),
     listStats: document.getElementById('list-stats'),
     totalItems: document.getElementById('total-items'),
@@ -211,6 +212,8 @@ function setupEventListeners() {
     elements.newListBtn.addEventListener('click', startNewList);
     elements.archiveListBtn.addEventListener('click', archiveCurrentList);
     elements.duplicateListBtn.addEventListener('click', duplicateSelectedList);
+    elements.editTitleBtn.addEventListener('click', startEditingTitle);
+    elements.listTitle.addEventListener('click', startEditingTitle);
     elements.addCommonBtn.addEventListener('click', addCommonItems);
 
     // Settings
@@ -715,12 +718,42 @@ function saveSettings() {
 // LIST MANAGEMENT
 // ============================================================================
 
-async function createNewList(autoAddFrequent = true) {
-    const listName = `List - ${new Date().toLocaleDateString('en-US', {
+async function generateListName() {
+    const today = new Date();
+    const dateStr = today.toLocaleDateString('en-US', {
         month: 'short',
         day: 'numeric',
         year: 'numeric'
-    })}`;
+    });
+
+    let sequenceNum = 1;
+
+    if (window.supabase && state.currentUser) {
+        try {
+            // Count lists created today
+            const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
+            const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).toISOString();
+
+            const { data: todaysLists, error } = await window.supabase
+                .from('grocery_lists')
+                .select('id')
+                .eq('user_id', state.currentUser.id)
+                .gte('created_at', startOfDay)
+                .lt('created_at', endOfDay);
+
+            if (!error && todaysLists) {
+                sequenceNum = todaysLists.length + 1;
+            }
+        } catch (e) {
+            console.error('Error counting today\'s lists:', e);
+        }
+    }
+
+    return `${dateStr} #${sequenceNum}`;
+}
+
+async function createNewList(autoAddFrequent = true) {
+    const listName = await generateListName();
 
     const newList = {
         name: listName,
@@ -1609,6 +1642,74 @@ function updateListTitle() {
     if (state.currentList) {
         elements.listTitle.textContent = state.currentList.name;
     }
+}
+
+function startEditingTitle() {
+    if (!state.currentList) return;
+
+    const titleEl = elements.listTitle;
+    const currentName = state.currentList.name;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentName;
+    input.className = 'edit-title-input';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = '✓';
+    saveBtn.className = 'btn btn-primary save-title-btn';
+
+    const wrapper = titleEl.parentNode;
+    const editBtn = wrapper.querySelector('.edit-title-btn');
+    titleEl.classList.add('hidden');
+    if (editBtn) editBtn.classList.add('hidden');
+
+    wrapper.insertBefore(input, editBtn);
+    wrapper.insertBefore(saveBtn, editBtn);
+    input.focus();
+    input.select();
+
+    async function saveTitle() {
+        const newName = input.value.trim();
+        if (!newName) {
+            cancelEdit();
+            return;
+        }
+
+        state.currentList.name = newName;
+
+        if (window.supabase && state.currentUser && state.currentList.id) {
+            try {
+                await window.supabase
+                    .from('grocery_lists')
+                    .update({ name: newName })
+                    .eq('id', state.currentList.id);
+            } catch (e) {
+                console.error('Error saving list name:', e);
+            }
+        } else {
+            saveToLocalStorage();
+        }
+
+        cancelEdit();
+        updateListTitle();
+        showToast('List renamed', 'success');
+    }
+
+    function cancelEdit() {
+        if (input.parentNode) input.remove();
+        if (saveBtn.parentNode) saveBtn.remove();
+        titleEl.classList.remove('hidden');
+        if (editBtn) editBtn.classList.remove('hidden');
+    }
+
+    saveBtn.addEventListener('click', saveTitle);
+    input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') saveTitle();
+    });
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') cancelEdit();
+    });
 }
 
 function renderItems() {

@@ -123,6 +123,55 @@ body {
     gap: 1rem;
 }
 
+.list-title-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.editable-title {
+    cursor: pointer;
+}
+
+.editable-title:hover {
+    color: var(--primary-color);
+}
+
+.edit-title-btn {
+    background: none;
+    border: none;
+    font-size: 1rem;
+    cursor: pointer;
+    opacity: 0.5;
+    padding: 0.25rem;
+    transition: opacity 0.2s;
+}
+
+.edit-title-btn:hover {
+    opacity: 1;
+}
+
+.edit-title-input {
+    font-size: 1.25rem;
+    font-weight: 600;
+    padding: 0.375rem 0.5rem;
+    border: 2px solid var(--primary-color);
+    border-radius: var(--border-radius);
+    background: var(--card-bg);
+    color: var(--text-color);
+    min-width: 200px;
+}
+
+.edit-title-input:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(74, 124, 89, 0.15);
+}
+
+.save-title-btn {
+    padding: 0.375rem 0.75rem;
+    font-size: 1rem;
+}
+
 .list-actions {
     display: flex;
     gap: 0.5rem;
