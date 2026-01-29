@@ -615,17 +615,25 @@ async function loadFromDatabase() {
             await createNewList();
         }
 
-        // Load frequent items
-        const { data: frequentItems, error: frequentError } = await window.supabase
-            .from('frequent_items')
-            .select('*')
-            .eq('user_id', state.currentUser.id)
-            .order('frequency_count', { ascending: false })
-            .limit(10);
+        // Load frequent items (non-fatal if table doesn't exist)
+        try {
+            const { data: frequentItems, error: frequentError } = await window.supabase
+                .from('frequent_items')
+                .select('*')
+                .eq('user_id', state.currentUser.id)
+                .order('frequency_count', { ascending: false })
+                .limit(10);
 
-        if (frequentError) throw frequentError;
-
-        state.frequentItems = frequentItems || [];
+            if (!frequentError) {
+                state.frequentItems = frequentItems || [];
+            } else {
+                console.warn('Could not load frequent items:', frequentError.message);
+                state.frequentItems = [];
+            }
+        } catch (e) {
+            console.warn('Frequent items table may not exist:', e.message);
+            state.frequentItems = [];
+        }
 
         // Load archived lists with their items
         const { data: archivedLists, error: archivedError } = await window.supabase
@@ -727,25 +735,41 @@ async function generateListName() {
     });
 
     let sequenceNum = 1;
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
 
     if (window.supabase && state.currentUser) {
         try {
-            // Count lists created today
-            const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
-            const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).toISOString();
-
             const { data: todaysLists, error } = await window.supabase
                 .from('grocery_lists')
                 .select('id')
                 .eq('user_id', state.currentUser.id)
-                .gte('created_at', startOfDay)
-                .lt('created_at', endOfDay);
+                .gte('created_at', todayStart.toISOString())
+                .lt('created_at', todayEnd.toISOString());
 
             if (!error && todaysLists) {
                 sequenceNum = todaysLists.length + 1;
             }
         } catch (e) {
             console.error('Error counting today\'s lists:', e);
+        }
+    }
+
+    // Fallback: also count from in-memory archived lists created today
+    if (sequenceNum === 1) {
+        let todayCount = 0;
+        const allLists = [...(state.archivedLists || [])];
+        if (state.currentList) allLists.push(state.currentList);
+
+        allLists.forEach(list => {
+            const created = new Date(list.created_at);
+            if (created >= todayStart && created < todayEnd) {
+                todayCount++;
+            }
+        });
+
+        if (todayCount > 0) {
+            sequenceNum = todayCount + 1;
         }
     }
 
