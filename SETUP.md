@@ -70,34 +70,96 @@ Try:
 
 ---
 
-## Optional: SMS/Email Integration
+## SMS Integration (Text-to-List via Twilio)
 
-### SMS Setup (Twilio)
+Users and family members can add items to the active grocery list by texting them to a Twilio phone number. Here's how to set it up:
+
+### Step 1: Create a Twilio Account
 
 1. Sign up at [twilio.com](https://www.twilio.com)
-2. Get a phone number
-3. Configure webhook:
-   - URL: `https://yourdomain.com/api/grocery/webhook`
-   - Method: POST
-4. Update `grocery/index.html` line with your Twilio number:
-   ```html
-   <code id="sms-number">+1 (YOUR-NUMBER)</code>
+2. Complete verification (free trial works)
+3. From the console, note your **Account SID** and **Auth Token**
+
+### Step 2: Get a Twilio Phone Number
+
+1. In Twilio Console → **Phone Numbers** → **Buy a Number**
+2. Choose a number with **SMS** capability
+3. Note the number (e.g. `+15551234567`)
+
+### Step 3: Run the Database Schema
+
+Make sure you've run the latest `schema.sql` in your Supabase SQL Editor. It includes the `user_phones` table needed for phone number registration.
+
+### Step 4: Deploy the Supabase Edge Function
+
+1. Install the Supabase CLI: `npm install -g supabase`
+2. Link to your project:
+   ```bash
+   cd shared-list
+   supabase login
+   supabase link --project-ref ilinxxocqvgncglwbvom
+   ```
+3. Deploy the SMS function:
+   ```bash
+   supabase functions deploy receive-sms --no-verify-jwt
+   ```
+   The `--no-verify-jwt` flag is required because Twilio sends unauthenticated webhooks.
+
+4. Note the function URL. It will be:
+   ```
+   https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/receive-sms
    ```
 
-5. Test by texting: "Grocery list: milk, bread, eggs"
+### Step 5: Configure the Twilio Webhook
 
-### Email Setup (SendGrid)
+1. In Twilio Console → **Phone Numbers** → click your number
+2. Under **Messaging** → **A Message Comes In**:
+   - Set to **Webhook**
+   - URL: `https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/receive-sms`
+   - Method: **HTTP POST**
+3. Click **Save**
 
-1. Sign up at [sendgrid.com](https://sendgrid.com)
-2. Set up Inbound Parse
-3. Configure domain: `grocery@yourdomain.com`
-4. Webhook URL: `https://yourdomain.com/api/grocery/webhook`
-5. Update `grocery/index.html`:
-   ```html
-   <code id="email-address">grocery@yourdomain.com</code>
-   ```
+### Step 6: Set the SMS Number in the App
 
-6. Test by emailing with subject "Grocery list"
+Add a `data-sms-number` attribute to the `<body>` tag in `index.html`, or store it in localStorage:
+
+```javascript
+localStorage.setItem('smsNumber', '+15551234567');
+```
+
+Replace with your actual Twilio number. This displays in Settings so users know where to text.
+
+### Step 7: Register Phone Numbers
+
+Each user/family member should:
+1. Open the app → **Settings** → **Text-to-List (SMS)**
+2. Enter their phone number and click **Save**
+3. They can now text items to the Twilio number
+
+### How It Works
+
+- User texts: `milk, eggs, bread, bananas`
+- Twilio forwards the SMS to the Supabase Edge Function
+- The function looks up the sender's phone number in `user_phones`
+- Finds their active grocery list (or their family group's list)
+- Parses the items (comma-separated or one per line)
+- Auto-categorizes each item and inserts into the list
+- Sends a reply SMS confirming what was added
+
+### SMS Format Examples
+
+```
+milk, eggs, bread
+```
+```
+chicken breast
+broccoli
+rice
+canned beans
+```
+```
+steak and potatoes and salad
+```
 
 ---
 

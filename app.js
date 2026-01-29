@@ -82,6 +82,13 @@ const elements = {
     acceptInviteBtn: document.getElementById('accept-invite-btn'),
     declineInviteBtn: document.getElementById('decline-invite-btn'),
 
+    // SMS / Phone
+    phoneNumberInput: document.getElementById('phone-number-input'),
+    savePhoneBtn: document.getElementById('save-phone-btn'),
+    phoneStatus: document.getElementById('phone-status'),
+    smsInstructions: document.getElementById('sms-instructions'),
+    smsNumber: document.getElementById('sms-number'),
+
     // Settings
     autoAddFrequentCheckbox: document.getElementById('auto-add-frequent'),
     groupByCategoryCheckbox: document.getElementById('group-by-category'),
@@ -233,6 +240,9 @@ function setupEventListeners() {
         elements.currentListSection.classList.remove('hidden');
     });
     elements.clearFrequentBtn.addEventListener('click', clearFrequentItems);
+
+    // SMS phone registration
+    elements.savePhoneBtn?.addEventListener('click', savePhoneNumber);
 
     // Family invite
     elements.sendInviteBtn?.addEventListener('click', sendFamilyInvite);
@@ -472,6 +482,9 @@ function handleAuthStateChange(session) {
 
     // Load family members
     loadFamilyMembers();
+
+    // Load phone number for SMS
+    loadPhoneNumber();
 }
 
 function handleSignOut() {
@@ -1682,6 +1695,110 @@ function checkForInvite() {
     const inviteToken = params.get('invite');
     if (inviteToken) {
         localStorage.setItem('pendingInviteToken', inviteToken);
+    }
+}
+
+// ============================================================================
+// SMS PHONE REGISTRATION
+// ============================================================================
+
+function normalizePhoneNumber(phone) {
+    // Strip everything except digits and leading +
+    let cleaned = phone.replace(/[\s\-().]/g, '');
+    // If no country code, assume US (+1)
+    if (cleaned.match(/^\d{10}$/)) {
+        cleaned = '+1' + cleaned;
+    } else if (cleaned.match(/^1\d{10}$/)) {
+        cleaned = '+' + cleaned;
+    }
+    return cleaned;
+}
+
+async function loadPhoneNumber() {
+    if (!window.supabase || !state.currentUser) return;
+
+    try {
+        const { data, error } = await window.supabase
+            .from('user_phones')
+            .select('phone_number')
+            .eq('user_id', state.currentUser.id)
+            .limit(1)
+            .single();
+
+        if (!error && data) {
+            elements.phoneNumberInput.value = data.phone_number;
+            elements.phoneStatus.textContent = 'Phone number registered';
+            elements.phoneStatus.className = 'phone-status phone-status-ok';
+            elements.phoneStatus.classList.remove('hidden');
+            showSmsInstructions();
+        }
+    } catch (e) {
+        console.warn('Could not load phone number:', e.message);
+    }
+}
+
+async function savePhoneNumber() {
+    const raw = elements.phoneNumberInput.value.trim();
+    if (!raw) {
+        showToast('Enter a phone number', 'warning');
+        return;
+    }
+
+    if (!state.currentUser) {
+        showToast('Sign in to register your phone number', 'warning');
+        return;
+    }
+
+    const phone = normalizePhoneNumber(raw);
+
+    // Basic validation
+    if (!/^\+\d{10,15}$/.test(phone)) {
+        showToast('Enter a valid phone number (e.g. +1 555 123 4567)', 'warning');
+        return;
+    }
+
+    try {
+        // Upsert: insert or update if user already has a phone registered
+        const { error } = await window.supabase
+            .from('user_phones')
+            .upsert({
+                user_id: state.currentUser.id,
+                phone_number: phone,
+                verified: true
+            }, {
+                onConflict: 'phone_number'
+            });
+
+        if (error) throw error;
+
+        elements.phoneNumberInput.value = phone;
+        elements.phoneStatus.textContent = 'Phone number saved';
+        elements.phoneStatus.className = 'phone-status phone-status-ok';
+        elements.phoneStatus.classList.remove('hidden');
+        showSmsInstructions();
+        showToast('Phone number registered for SMS', 'success');
+
+    } catch (error) {
+        console.error('Error saving phone number:', error);
+        if (error.message?.includes('unique') || error.code === '23505') {
+            showToast('This phone number is already registered to another account', 'error');
+        } else {
+            showToast('Failed to save phone number', 'error');
+        }
+    }
+}
+
+function showSmsInstructions() {
+    if (elements.smsInstructions) {
+        elements.smsInstructions.classList.remove('hidden');
+    }
+    // The Twilio number is configured in the environment
+    // Display it from a data attribute or config
+    const twilioNumber = document.body.dataset.smsNumber || localStorage.getItem('smsNumber');
+    if (twilioNumber && elements.smsNumber) {
+        elements.smsNumber.textContent = twilioNumber;
+    } else if (elements.smsNumber) {
+        elements.smsNumber.textContent = 'Set in app config';
     }
 }
 

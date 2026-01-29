@@ -142,20 +142,26 @@
                         </div>
 
                         <div class="settings-section">
-                            <h3>SMS Integration</h3>
-                            <p class="help-text">Text items to this number with "Grocery list:" followed by items</p>
-                            <div class="integration-info">
-                                <code id="sms-number">+1 (555) 123-4567</code>
-                                <p class="help-text">Example: "Grocery list: milk, bread, eggs"</p>
+                            <h3>Text-to-List (SMS)</h3>
+                            <p class="help-text">Register your phone number to add items by texting them to the grocery list number.</p>
+                            <div class="phone-register-form">
+                                <input type="tel" id="phone-number-input" placeholder="+1 555 123 4567" class="phone-input">
+                                <button id="save-phone-btn" class="btn btn-primary">Save</button>
                             </div>
-                        </div>
-
-                        <div class="settings-section">
-                            <h3>Email Integration</h3>
-                            <p class="help-text">Email your list to this address</p>
-                            <div class="integration-info">
-                                <code id="email-address">grocery@yourdomain.com</code>
-                                <p class="help-text">Subject: "Grocery list" | Body: list of items</p>
+                            <div id="phone-status" class="phone-status hidden"></div>
+                            <div id="sms-instructions" class="sms-instructions hidden">
+                                <p class="sms-number-label">Text your items to:</p>
+                                <code id="sms-number" class="sms-number">Loading...</code>
+                                <div class="sms-examples">
+                                    <p class="help-text"><strong>How it works:</strong></p>
+                                    <p class="help-text">Just text your items separated by commas:</p>
+                                    <code class="sms-example">milk, eggs, bread, bananas</code>
+                                    <p class="help-text">Or one item per line:</p>
+                                    <code class="sms-example">chicken breast
+broccoli
+rice</code>
+                                    <p class="help-text">Items are auto-categorized and added to your active list. All family members can text in items.</p>
+                                </div>
                             </div>
                         </div>
 
