@@ -433,6 +433,7 @@ body {
     font-size: 1.5rem;
     opacity: 0;
     transition: opacity 0.2s;
+    pointer-events: none;
 }
 
 .item.swiping .item-swipe-bg {
