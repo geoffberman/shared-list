@@ -68,6 +68,43 @@ CREATE TABLE IF NOT EXISTS family_members (
     UNIQUE(family_group_id, email)
 );
 
+-- User Phone Numbers Table
+-- Maps phone numbers to users for SMS integration
+CREATE TABLE IF NOT EXISTS user_phones (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    phone_number TEXT NOT NULL,
+    verified BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(phone_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_phones_phone ON user_phones(phone_number);
+CREATE INDEX IF NOT EXISTS idx_user_phones_user ON user_phones(user_id);
+
+ALTER TABLE user_phones ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own phone numbers"
+    ON user_phones FOR SELECT
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can manage their own phone numbers"
+    ON user_phones FOR INSERT
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own phone numbers"
+    ON user_phones FOR UPDATE
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own phone numbers"
+    ON user_phones FOR DELETE
+    USING (auth.uid() = user_id);
+
+-- Service role can read all phone numbers (for SMS webhook)
+CREATE POLICY "Service role can read all phones"
+    ON user_phones FOR SELECT
+    USING (true);
+
 -- SMS/Email Integration Log
 -- Tracks items added via SMS or email
 CREATE TABLE IF NOT EXISTS integration_log (
