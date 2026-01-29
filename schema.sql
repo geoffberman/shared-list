@@ -275,6 +275,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS update_grocery_lists_updated_at ON grocery_lists;
 CREATE TRIGGER update_grocery_lists_updated_at
     BEFORE UPDATE ON grocery_lists
     FOR EACH ROW
@@ -309,6 +310,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS update_frequent_items_trigger ON grocery_lists;
 CREATE TRIGGER update_frequent_items_trigger
     AFTER UPDATE ON grocery_lists
     FOR EACH ROW
