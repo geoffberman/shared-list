@@ -154,6 +154,37 @@ body {
     box-shadow: 0 0 0 3px rgba(74, 124, 89, 0.15);
 }
 
+/* Duplicate Warning */
+.duplicate-warning {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffc107;
+    border-radius: var(--border-radius);
+    font-size: 0.95rem;
+}
+
+.dismiss-warning-btn {
+    background: none;
+    border: 1px solid #856404;
+    color: #856404;
+    padding: 0.375rem 0.75rem;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
+.dismiss-warning-btn:hover {
+    background: #856404;
+    color: white;
+}
+
 /* Add Item Form */
 .add-item-form {
     display: flex;

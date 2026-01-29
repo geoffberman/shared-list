@@ -409,6 +409,28 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
+function showDuplicateWarning(itemName) {
+    // Remove any existing duplicate warning
+    const existing = document.querySelector('.duplicate-warning');
+    if (existing) existing.remove();
+
+    const warning = document.createElement('div');
+    warning.className = 'duplicate-warning';
+    warning.innerHTML = `
+        <span>"${itemName}" is already on your list</span>
+        <button class="dismiss-warning-btn">Dismiss</button>
+    `;
+    warning.querySelector('.dismiss-warning-btn').addEventListener('click', () => {
+        warning.remove();
+    });
+
+    // Insert after the add form
+    const addForm = document.querySelector('.add-item-form');
+    if (addForm) {
+        addForm.parentNode.insertBefore(warning, addForm.nextSibling);
+    }
+}
+
 // ============================================================================
 // AUTHENTICATION
 // ============================================================================
@@ -997,6 +1019,13 @@ async function addItem() {
     const name = elements.itemInput.value.trim();
     if (!name) return;
 
+    // Check for duplicate
+    const duplicate = state.items.find(i => i.name.toLowerCase() === name.toLowerCase());
+    if (duplicate) {
+        showDuplicateWarning(name);
+        return;
+    }
+
     const quantity = elements.quantityInput.value.trim();
     let category = elements.categoryInput.value;
 
@@ -1520,7 +1549,7 @@ function autoCategorize(itemName) {
     const name = itemName.toLowerCase();
 
     // Bakery
-    if (/bread|bun|roll|bagel|croissant|muffin|donut|cake|cookie|pastry|biscuit|scone|waffle|pancake|tortilla|pita/.test(name)) {
+    if (/bread|bun\b|rolls?\b|bagel|croissant|muffin|donut|cake\b|cookie|pastry|biscuit|scone|waffle|pancake|tortilla|pita/.test(name)) {
         return 'bakery';
     }
 
@@ -1540,7 +1569,7 @@ function autoCategorize(itemName) {
     }
 
     // Dairy
-    if (/milk|yogurt|butter|cream|egg/.test(name)) {
+    if (/milk|yogurt|butter|cream\b|eggs?\b/.test(name)) {
         return 'dairy';
     }
 
@@ -1555,17 +1584,17 @@ function autoCategorize(itemName) {
     }
 
     // Beverages
-    if (/water|juice|soda|coffee|tea|wine|beer|kombucha|drink|sparkling/.test(name)) {
+    if (/water\b|juice|soda|coffee|\btea\b|wine\b|beer|kombucha|drink|sparkling/.test(name)) {
         return 'beverages';
     }
 
     // Snacks
-    if (/chip|cracker|nut|popcorn|pretzel|trail mix|granola|candy|chocolate/.test(name)) {
+    if (/chips?\b|cracker|nuts?\b|popcorn|pretzel|trail mix|granola|candy|chocolate/.test(name)) {
         return 'snacks';
     }
 
     // Household
-    if (/soap|detergent|paper|towel|tissue|trash|bag|sponge|cleaner|bleach|wrap|foil|plastic/.test(name)) {
+    if (/soap|detergent|paper\b|towel|tissue|trash|bags?\b|sponge|cleaner|bleach|wrap\b|foil|plastic/.test(name)) {
         return 'household';
     }
 
