@@ -60,12 +60,13 @@
                         </div>
                     </div>
 
-                    <!-- Recent Lists Dropdown -->
+                    <!-- Recent Lists & Common Items Bar -->
                     <div class="recent-lists-bar">
                         <select id="recent-lists-dropdown" class="recent-lists-dropdown">
                             <option value="">Recent lists...</option>
                         </select>
                         <button id="duplicate-list-btn" class="btn btn-secondary">📋 Duplicate</button>
+                        <button id="add-common-btn" class="btn btn-secondary">⭐ Add Common Items</button>
                     </div>
 
                     <!-- Add Item Form -->
@@ -128,6 +129,16 @@
                     </div>
                     <div class="modal-body">
                         <div class="settings-section">
+                            <h3>Family Group</h3>
+                            <p class="help-text">Invite family members by email to share all your lists</p>
+                            <div class="invite-form">
+                                <input type="email" id="invite-email" placeholder="Email address" class="invite-email-input">
+                                <button id="send-invite-btn" class="btn btn-primary">Send Invite</button>
+                            </div>
+                            <div id="family-members-list" class="family-members-list"></div>
+                        </div>
+
+                        <div class="settings-section">
                             <h3>SMS Integration</h3>
                             <p class="help-text">Text items to this number with "Grocery list:" followed by items</p>
                             <div class="integration-info">
@@ -146,8 +157,8 @@
                         </div>
 
                         <div class="settings-section">
-                            <h3>Family Members</h3>
-                            <p class="help-text">Share this link with family members to collaborate</p>
+                            <h3>Share Link</h3>
+                            <p class="help-text">Share this link for quick access</p>
                             <div class="share-link">
                                 <input type="text" id="share-link" readonly value="">
                                 <button id="copy-link-btn" class="btn btn-secondary">📋 Copy</button>
@@ -240,7 +251,28 @@
                                 <option value="other">📦 Other</option>
                             </select>
                         </div>
-                        <button id="save-edit-btn" class="btn btn-primary">Save Changes</button>
+                        <div class="form-group">
+                            <label for="edit-item-notes">Notes</label>
+                            <input type="text" id="edit-item-notes" class="item-input" placeholder="e.g. organic, brand name, size...">
+                        </div>
+                        <button id="save-edit-btn" class="btn btn-primary">💾 Save Changes</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Invite Modal -->
+            <div id="invite-modal" class="modal hidden">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>Family Invitation</h2>
+                        <button id="close-invite-btn" class="btn-close">×</button>
+                    </div>
+                    <div class="modal-body">
+                        <p id="invite-message"></p>
+                        <div class="invite-actions">
+                            <button id="accept-invite-btn" class="btn btn-primary">Accept Invitation</button>
+                            <button id="decline-invite-btn" class="btn btn-secondary">Decline</button>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -46,15 +46,26 @@ CREATE TABLE IF NOT EXISTS frequent_items (
     UNIQUE(user_id, name)
 );
 
--- Family Members Table (Optional for sharing)
--- Allows multiple users to share the same grocery list
+-- Family Groups Table
+-- Each group allows multiple users to share grocery lists
+CREATE TABLE IF NOT EXISTS family_groups (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Family Members Table
+-- Tracks invitations and memberships within a family group
 CREATE TABLE IF NOT EXISTS family_members (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    family_id UUID NOT NULL,
+    family_group_id UUID REFERENCES family_groups(id) ON DELETE CASCADE,
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-    joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    role TEXT DEFAULT 'member', -- 'owner' or 'member'
-    UNIQUE(family_id, user_id)
+    email TEXT NOT NULL,
+    status TEXT DEFAULT 'pending', -- 'pending' or 'accepted'
+    invited_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(family_group_id, email)
 );
 
 -- SMS/Email Integration Log
@@ -75,7 +86,9 @@ CREATE INDEX IF NOT EXISTS idx_grocery_items_list_id ON grocery_items(list_id);
 CREATE INDEX IF NOT EXISTS idx_grocery_items_checked ON grocery_items(is_checked);
 CREATE INDEX IF NOT EXISTS idx_frequent_items_user_id ON frequent_items(user_id);
 CREATE INDEX IF NOT EXISTS idx_frequent_items_frequency ON frequent_items(frequency_count DESC);
-CREATE INDEX IF NOT EXISTS idx_family_members_family_id ON family_members(family_id);
+CREATE INDEX IF NOT EXISTS idx_family_groups_created_by ON family_groups(created_by);
+CREATE INDEX IF NOT EXISTS idx_family_members_family_group_id ON family_members(family_group_id);
+CREATE INDEX IF NOT EXISTS idx_family_members_email ON family_members(email);
 
 -- Unique constraint: Only one active (non-archived) list per user
 CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_list_per_user
@@ -88,6 +101,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_list_per_user
 ALTER TABLE grocery_lists ENABLE ROW LEVEL SECURITY;
 ALTER TABLE grocery_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE frequent_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE family_groups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE family_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE integration_log ENABLE ROW LEVEL SECURITY;
 
@@ -97,7 +111,7 @@ CREATE POLICY "Users can view their own lists"
     ON grocery_lists FOR SELECT
     USING (
         auth.uid() = user_id
-        OR family_id IN (SELECT family_id FROM family_members WHERE user_id = auth.uid())
+        OR family_id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
     );
 
 -- Users can insert their own lists
@@ -110,7 +124,7 @@ CREATE POLICY "Users can update their own lists"
     ON grocery_lists FOR UPDATE
     USING (
         auth.uid() = user_id
-        OR family_id IN (SELECT family_id FROM family_members WHERE user_id = auth.uid())
+        OR family_id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
     );
 
 -- Users can delete their own lists
@@ -126,7 +140,7 @@ CREATE POLICY "Users can view items in their lists"
         list_id IN (
             SELECT id FROM grocery_lists
             WHERE user_id = auth.uid()
-            OR family_id IN (SELECT family_id FROM family_members WHERE user_id = auth.uid())
+            OR family_id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
         )
     );
 
@@ -137,7 +151,7 @@ CREATE POLICY "Users can add items to their lists"
         list_id IN (
             SELECT id FROM grocery_lists
             WHERE user_id = auth.uid()
-            OR family_id IN (SELECT family_id FROM family_members WHERE user_id = auth.uid())
+            OR family_id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
         )
     );
 
@@ -148,7 +162,7 @@ CREATE POLICY "Users can update items in their lists"
         list_id IN (
             SELECT id FROM grocery_lists
             WHERE user_id = auth.uid()
-            OR family_id IN (SELECT family_id FROM family_members WHERE user_id = auth.uid())
+            OR family_id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
         )
     );
 
@@ -159,7 +173,7 @@ CREATE POLICY "Users can delete items from their lists"
         list_id IN (
             SELECT id FROM grocery_lists
             WHERE user_id = auth.uid()
-            OR family_id IN (SELECT family_id FROM family_members WHERE user_id = auth.uid())
+            OR family_id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
         )
     );
 
@@ -173,18 +187,37 @@ CREATE POLICY "Users can manage their own frequent items"
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
 
+-- Family Groups Policies
+CREATE POLICY "Users can view their family groups"
+    ON family_groups FOR SELECT
+    USING (
+        created_by = auth.uid()
+        OR id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
+    );
+
+CREATE POLICY "Users can create family groups"
+    ON family_groups FOR INSERT
+    WITH CHECK (auth.uid() = created_by);
+
 -- Family Members Policies
 CREATE POLICY "Users can view their family members"
     ON family_members FOR SELECT
-    USING (auth.uid() = user_id OR family_id IN (SELECT family_id FROM family_members WHERE user_id = auth.uid()));
-
-CREATE POLICY "Family owners can manage members"
-    ON family_members FOR ALL
     USING (
-        family_id IN (
-            SELECT family_id FROM family_members
-            WHERE user_id = auth.uid() AND role = 'owner'
-        )
+        user_id = auth.uid()
+        OR email = (SELECT email FROM auth.users WHERE id = auth.uid())
+        OR family_group_id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
+    );
+
+CREATE POLICY "Users can invite family members"
+    ON family_members FOR INSERT
+    WITH CHECK (
+        invited_by = auth.uid()
+    );
+
+CREATE POLICY "Users can accept their own invites"
+    ON family_members FOR UPDATE
+    USING (
+        email = (SELECT email FROM auth.users WHERE id = auth.uid())
     );
 
 -- Integration Log Policies
@@ -244,7 +277,7 @@ CREATE TRIGGER update_frequent_items_trigger
     FOR EACH ROW
     EXECUTE FUNCTION update_frequent_items_on_archive();
 
--- Grant permissions
+-- Grant permissions (covers all tables including family_groups)
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated;

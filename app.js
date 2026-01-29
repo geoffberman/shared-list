@@ -11,6 +11,8 @@ const state = {
     items: [],
     frequentItems: [],
     archivedLists: [],
+    familyMembers: [],
+    familyGroupId: null,
     settings: {
         autoAddFrequent: true,
         groupByCategory: false
@@ -47,6 +49,7 @@ const elements = {
     // Recent lists
     recentListsDropdown: document.getElementById('recent-lists-dropdown'),
     duplicateListBtn: document.getElementById('duplicate-list-btn'),
+    addCommonBtn: document.getElementById('add-common-btn'),
 
     // Buttons
     newListBtn: document.getElementById('new-list-btn'),
@@ -65,7 +68,18 @@ const elements = {
     editItemName: document.getElementById('edit-item-name'),
     editItemQuantity: document.getElementById('edit-item-quantity'),
     editItemCategory: document.getElementById('edit-item-category'),
+    editItemNotes: document.getElementById('edit-item-notes'),
     saveEditBtn: document.getElementById('save-edit-btn'),
+
+    // Family invite
+    inviteEmail: document.getElementById('invite-email'),
+    sendInviteBtn: document.getElementById('send-invite-btn'),
+    familyMembersList: document.getElementById('family-members-list'),
+    inviteModal: document.getElementById('invite-modal'),
+    closeInviteBtn: document.getElementById('close-invite-btn'),
+    inviteMessage: document.getElementById('invite-message'),
+    acceptInviteBtn: document.getElementById('accept-invite-btn'),
+    declineInviteBtn: document.getElementById('decline-invite-btn'),
 
     // Settings
     autoAddFrequentCheckbox: document.getElementById('auto-add-frequent'),
@@ -113,6 +127,9 @@ async function init() {
 
     // Register service worker
     registerServiceWorker();
+
+    // Check for invite token in URL
+    checkForInvite();
 
     // Check authentication state
     if (window.supabase) {
@@ -194,6 +211,7 @@ function setupEventListeners() {
     elements.newListBtn.addEventListener('click', startNewList);
     elements.archiveListBtn.addEventListener('click', archiveCurrentList);
     elements.duplicateListBtn.addEventListener('click', duplicateSelectedList);
+    elements.addCommonBtn.addEventListener('click', addCommonItems);
 
     // Settings
     elements.settingsBtn.addEventListener('click', () => {
@@ -212,6 +230,17 @@ function setupEventListeners() {
         elements.currentListSection.classList.remove('hidden');
     });
     elements.clearFrequentBtn.addEventListener('click', clearFrequentItems);
+
+    // Family invite
+    elements.sendInviteBtn?.addEventListener('click', sendFamilyInvite);
+    elements.closeInviteBtn?.addEventListener('click', () => {
+        elements.inviteModal.classList.add('hidden');
+    });
+    elements.acceptInviteBtn?.addEventListener('click', acceptInvite);
+    elements.declineInviteBtn?.addEventListener('click', () => {
+        elements.inviteModal.classList.add('hidden');
+        showToast('Invitation declined', 'info');
+    });
 
     // Settings checkboxes
     elements.autoAddFrequentCheckbox.addEventListener('change', (e) => {
@@ -288,6 +317,9 @@ function setupEventListeners() {
         if (e.target === elements.editModal) {
             closeEditModal();
         }
+        if (e.target === elements.inviteModal) {
+            elements.inviteModal.classList.add('hidden');
+        }
         if (!elements.userMenuBtn?.contains(e.target) && !elements.userMenu?.contains(e.target)) {
             elements.userMenu?.classList.add('hidden');
         }
@@ -297,9 +329,15 @@ function setupEventListeners() {
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             elements.settingsModal.classList.add('hidden');
+            elements.inviteModal.classList.add('hidden');
             closeEditModal();
         }
     });
+
+    // Event delegation for dynamic item buttons
+    elements.itemsList.addEventListener('click', handleItemClick);
+    elements.itemsList.addEventListener('change', handleItemChange);
+    elements.itemsList.addEventListener('keypress', handleItemKeypress);
 
     // Online/offline detection
     window.addEventListener('online', () => {
@@ -311,6 +349,45 @@ function setupEventListeners() {
     window.addEventListener('offline', () => {
         showToast('You are offline. Changes will sync when reconnected.', 'warning');
     });
+}
+
+// ============================================================================
+// EVENT DELEGATION FOR ITEMS
+// ============================================================================
+
+function handleItemClick(e) {
+    const target = e.target.closest('button');
+    if (!target) return;
+
+    const itemId = target.dataset.itemId;
+    if (!itemId) return;
+
+    if (target.classList.contains('delete-item-btn')) {
+        e.preventDefault();
+        e.stopPropagation();
+        deleteItem(itemId);
+    } else if (target.classList.contains('edit-item-btn')) {
+        e.preventDefault();
+        e.stopPropagation();
+        openEditModal(itemId);
+    } else if (target.classList.contains('save-notes-btn')) {
+        e.preventDefault();
+        e.stopPropagation();
+        saveInlineNotes(itemId);
+    }
+}
+
+function handleItemChange(e) {
+    if (e.target.classList.contains('item-checkbox')) {
+        toggleItem(e.target.dataset.itemId);
+    }
+}
+
+function handleItemKeypress(e) {
+    if (e.key === 'Enter' && e.target.classList.contains('item-notes-input')) {
+        const itemId = e.target.dataset.itemId;
+        if (itemId) saveInlineNotes(itemId);
+    }
 }
 
 // ============================================================================
@@ -367,6 +444,9 @@ function handleAuthStateChange(session) {
 
     // Load data from database
     loadFromDatabase();
+
+    // Load family members
+    loadFamilyMembers();
 }
 
 function handleSignOut() {
@@ -384,6 +464,8 @@ function handleSignOut() {
     state.items = [];
     state.frequentItems = [];
     state.archivedLists = [];
+    state.familyMembers = [];
+    state.familyGroupId = null;
 
     loadFromLocalStorage();
     showToast('Signed out', 'info');
@@ -832,6 +914,7 @@ async function duplicateSelectedList() {
             name: item.name,
             quantity: item.quantity,
             category: item.category,
+            notes: item.notes || '',
             is_checked: false,
             created_at: new Date().toISOString()
         };
@@ -854,6 +937,54 @@ async function duplicateSelectedList() {
 }
 
 // ============================================================================
+// ADD COMMON ITEMS
+// ============================================================================
+
+async function addCommonItems() {
+    if (state.frequentItems.length === 0) {
+        showToast('No common items yet. Shop more to build your frequent items list!', 'info');
+        return;
+    }
+
+    const itemsToAdd = state.frequentItems.slice(0, 10);
+    let addedCount = 0;
+
+    for (const freqItem of itemsToAdd) {
+        // Skip if already on list
+        if (state.items.find(i => i.name.toLowerCase() === freqItem.name.toLowerCase())) {
+            continue;
+        }
+
+        const newItem = {
+            name: freqItem.name,
+            quantity: freqItem.typical_quantity || '',
+            category: freqItem.category || '',
+            notes: '',
+            is_checked: false,
+            created_at: new Date().toISOString()
+        };
+
+        if (window.supabase && state.currentUser && state.currentList?.id) {
+            await addItemToDatabase(newItem);
+        } else {
+            newItem.id = Date.now() + Math.random();
+            state.items.push(newItem);
+        }
+        addedCount++;
+    }
+
+    if (addedCount === 0) {
+        showToast('All common items are already on your list', 'info');
+    } else {
+        if (!(window.supabase && state.currentUser)) {
+            saveToLocalStorage();
+        }
+        renderItems();
+        showToast(`Added ${addedCount} common item${addedCount !== 1 ? 's' : ''}`, 'success');
+    }
+}
+
+// ============================================================================
 // ITEM MANAGEMENT
 // ============================================================================
 
@@ -873,6 +1004,7 @@ async function addItem() {
         name,
         quantity,
         category,
+        notes: '',
         is_checked: false,
         created_at: new Date().toISOString()
     };
@@ -905,6 +1037,7 @@ async function addItemToDatabase(item) {
                 name: item.name,
                 quantity: item.quantity,
                 category: item.category,
+                notes: item.notes || '',
                 added_by: state.currentUser.id,
                 is_checked: false
             }])
@@ -959,6 +1092,10 @@ async function deleteItem(itemId) {
     const item = state.items.find(i => i.id == itemId);
     const itemName = item ? item.name : '';
 
+    state.items = state.items.filter(i => i.id != itemId);
+    renderItems();
+    saveToLocalStorage();
+
     if (window.supabase && state.currentUser && state.currentList?.id) {
         try {
             const { error } = await window.supabase
@@ -967,21 +1104,9 @@ async function deleteItem(itemId) {
                 .eq('id', itemId);
 
             if (error) throw error;
-
-            state.items = state.items.filter(i => i.id != itemId);
-            renderItems();
-            saveToLocalStorage();
-
         } catch (error) {
-            console.error('Error deleting item:', error);
-            state.items = state.items.filter(i => i.id != itemId);
-            saveToLocalStorage();
-            renderItems();
+            console.error('Error deleting item from database:', error);
         }
-    } else {
-        state.items = state.items.filter(i => i.id != itemId);
-        saveToLocalStorage();
-        renderItems();
     }
 
     if (itemName) {
@@ -999,6 +1124,7 @@ function openEditModal(itemId) {
     elements.editItemName.value = item.name;
     elements.editItemQuantity.value = item.quantity || '';
     elements.editItemCategory.value = item.category || '';
+    elements.editItemNotes.value = item.notes || '';
 
     elements.editModal.classList.remove('hidden');
 }
@@ -1017,6 +1143,7 @@ async function saveEditedItem() {
     const newName = elements.editItemName.value.trim();
     const newQuantity = elements.editItemQuantity.value.trim();
     const newCategory = elements.editItemCategory.value;
+    const newNotes = elements.editItemNotes.value.trim();
 
     if (!newName) {
         showToast('Item name cannot be empty', 'error');
@@ -1026,6 +1153,7 @@ async function saveEditedItem() {
     item.name = newName;
     item.quantity = newQuantity;
     item.category = newCategory;
+    item.notes = newNotes;
 
     if (window.supabase && state.currentUser && state.currentList?.id) {
         try {
@@ -1034,7 +1162,8 @@ async function saveEditedItem() {
                 .update({
                     name: item.name,
                     quantity: item.quantity,
-                    category: item.category
+                    category: item.category,
+                    notes: item.notes
                 })
                 .eq('id', currentEditItemId);
 
@@ -1053,6 +1182,35 @@ async function saveEditedItem() {
     showToast('Item updated', 'success');
 }
 
+async function saveInlineNotes(itemId) {
+    const item = state.items.find(i => i.id == itemId);
+    if (!item) return;
+
+    const notesInput = document.querySelector(`.item-notes-input[data-item-id="${itemId}"]`);
+    if (!notesInput) return;
+
+    item.notes = notesInput.value.trim();
+
+    if (window.supabase && state.currentUser && state.currentList?.id) {
+        try {
+            const { error } = await window.supabase
+                .from('grocery_items')
+                .update({ notes: item.notes })
+                .eq('id', itemId);
+
+            if (error) throw error;
+        } catch (error) {
+            console.error('Error saving notes:', error);
+            saveToLocalStorage();
+        }
+    } else {
+        saveToLocalStorage();
+    }
+
+    renderItems();
+    showToast('Notes saved', 'success');
+}
+
 async function addFrequentItem(itemName, category, quantity) {
     // Check if already in list
     if (state.items.find(i => i.name.toLowerCase() === itemName.toLowerCase())) {
@@ -1064,6 +1222,7 @@ async function addFrequentItem(itemName, category, quantity) {
         name: itemName,
         quantity: quantity,
         category: category,
+        notes: '',
         is_checked: false,
         created_at: new Date().toISOString()
     };
@@ -1159,6 +1318,193 @@ function setupSwipeHandlers() {
             isSwiping = false;
         }, { passive: true });
     });
+}
+
+// ============================================================================
+// FAMILY GROUP & INVITATIONS
+// ============================================================================
+
+async function loadFamilyMembers() {
+    if (!window.supabase || !state.currentUser) return;
+
+    try {
+        // Check if user belongs to a family group
+        const { data: memberships, error: memberError } = await window.supabase
+            .from('family_members')
+            .select('*')
+            .eq('user_id', state.currentUser.id)
+            .eq('status', 'accepted');
+
+        if (memberError) throw memberError;
+
+        if (memberships && memberships.length > 0) {
+            state.familyGroupId = memberships[0].family_group_id;
+
+            // Load all members of the group
+            const { data: members, error: groupError } = await window.supabase
+                .from('family_members')
+                .select('*')
+                .eq('family_group_id', state.familyGroupId);
+
+            if (groupError) throw groupError;
+
+            state.familyMembers = members || [];
+        } else {
+            state.familyMembers = [];
+            state.familyGroupId = null;
+        }
+
+        // Also check for pending invites TO this user
+        const { data: pendingInvites, error: inviteError } = await window.supabase
+            .from('family_members')
+            .select('*')
+            .eq('email', state.currentUser.email)
+            .eq('status', 'pending');
+
+        if (!inviteError && pendingInvites && pendingInvites.length > 0) {
+            showPendingInvite(pendingInvites[0]);
+        }
+
+    } catch (error) {
+        console.error('Error loading family members:', error);
+    }
+
+    renderFamilyMembers();
+}
+
+async function sendFamilyInvite() {
+    const email = elements.inviteEmail.value.trim();
+    if (!email) {
+        showToast('Enter an email address', 'warning');
+        return;
+    }
+
+    if (!state.currentUser) {
+        showToast('Sign in to invite family members', 'warning');
+        return;
+    }
+
+    try {
+        // Create or get family group
+        let groupId = state.familyGroupId;
+        if (!groupId) {
+            // Create a new family group
+            const { data: group, error: groupError } = await window.supabase
+                .from('family_groups')
+                .insert([{
+                    created_by: state.currentUser.id,
+                    name: `${state.currentUser.email}'s Family`
+                }])
+                .select()
+                .single();
+
+            if (groupError) throw groupError;
+
+            groupId = group.id;
+            state.familyGroupId = groupId;
+
+            // Add self as accepted member
+            await window.supabase
+                .from('family_members')
+                .insert([{
+                    family_group_id: groupId,
+                    user_id: state.currentUser.id,
+                    email: state.currentUser.email,
+                    status: 'accepted',
+                    invited_by: state.currentUser.id
+                }]);
+        }
+
+        // Check if already invited
+        const existing = state.familyMembers.find(m => m.email === email);
+        if (existing) {
+            showToast(`${email} is already ${existing.status === 'accepted' ? 'a member' : 'invited'}`, 'warning');
+            return;
+        }
+
+        // Send invite
+        const { data: invite, error: inviteError } = await window.supabase
+            .from('family_members')
+            .insert([{
+                family_group_id: groupId,
+                email: email,
+                status: 'pending',
+                invited_by: state.currentUser.id
+            }])
+            .select()
+            .single();
+
+        if (inviteError) throw inviteError;
+
+        state.familyMembers.push(invite);
+        renderFamilyMembers();
+        elements.inviteEmail.value = '';
+        showToast(`Invitation sent to ${email}`, 'success');
+
+    } catch (error) {
+        console.error('Error sending invite:', error);
+        showToast('Failed to send invitation', 'error');
+    }
+}
+
+function showPendingInvite(invite) {
+    elements.inviteMessage.textContent =
+        `You've been invited to join a family grocery group. Accept to share lists with all group members.`;
+    elements.inviteModal.dataset.inviteId = invite.id;
+    elements.inviteModal.dataset.groupId = invite.family_group_id;
+    elements.inviteModal.classList.remove('hidden');
+}
+
+async function acceptInvite() {
+    const inviteId = elements.inviteModal.dataset.inviteId;
+    const groupId = elements.inviteModal.dataset.groupId;
+
+    if (!inviteId || !state.currentUser) return;
+
+    try {
+        const { error } = await window.supabase
+            .from('family_members')
+            .update({
+                status: 'accepted',
+                user_id: state.currentUser.id
+            })
+            .eq('id', inviteId);
+
+        if (error) throw error;
+
+        state.familyGroupId = groupId;
+        elements.inviteModal.classList.add('hidden');
+        showToast('Welcome to the family group!', 'success');
+        loadFamilyMembers();
+
+    } catch (error) {
+        console.error('Error accepting invite:', error);
+        showToast('Failed to accept invitation', 'error');
+    }
+}
+
+function renderFamilyMembers() {
+    if (state.familyMembers.length === 0) {
+        elements.familyMembersList.innerHTML = '<p class="help-text">No family members yet. Send an invite!</p>';
+        return;
+    }
+
+    const html = state.familyMembers.map(member => `
+        <div class="family-member">
+            <span class="member-email">${escapeHtml(member.email || 'Unknown')}</span>
+            <span class="member-status ${member.status}">${member.status === 'accepted' ? 'Member' : 'Pending'}</span>
+        </div>
+    `).join('');
+
+    elements.familyMembersList.innerHTML = html;
+}
+
+function checkForInvite() {
+    const params = new URLSearchParams(window.location.search);
+    const inviteToken = params.get('invite');
+    if (inviteToken) {
+        localStorage.setItem('pendingInviteToken', inviteToken);
+    }
 }
 
 // ============================================================================
@@ -1300,41 +1646,30 @@ function renderItems() {
         existingProgress.querySelector('.list-progress-bar').style.width = `${progressPercent}%`;
     }
 
-    // Add event listeners
-    document.querySelectorAll('.item-checkbox').forEach(checkbox => {
-        checkbox.addEventListener('change', (e) => {
-            toggleItem(e.target.dataset.itemId);
-        });
-    });
-
-    document.querySelectorAll('.edit-item-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            openEditModal(e.currentTarget.dataset.itemId);
-        });
-    });
-
-    document.querySelectorAll('.delete-item-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            deleteItem(e.currentTarget.dataset.itemId);
-        });
-    });
-
     // Setup swipe handlers for mobile
     setupSwipeHandlers();
 }
 
 function renderItemHTML(item) {
+    const hasNotes = item.notes && item.notes.trim();
     return `
         <div class="item ${item.is_checked ? 'checked' : ''}">
-            <label class="item-label">
-                <input type="checkbox"
-                       class="item-checkbox"
-                       data-item-id="${item.id}"
-                       ${item.is_checked ? 'checked' : ''}>
-                <span class="item-name">${escapeHtml(item.name)}</span>
-                ${item.quantity ? `<span class="item-quantity">${escapeHtml(item.quantity)}</span>` : ''}
-            </label>
+            <div class="item-details">
+                <div class="item-top-row">
+                    <input type="checkbox"
+                           class="item-checkbox"
+                           data-item-id="${item.id}"
+                           ${item.is_checked ? 'checked' : ''}>
+                    <span class="item-name">${escapeHtml(item.name)}</span>
+                    ${item.quantity ? `<span class="item-quantity">${escapeHtml(item.quantity)}</span>` : ''}
+                </div>
+                ${hasNotes
+                    ? `<div class="item-notes">${escapeHtml(item.notes)}</div>`
+                    : `<input type="text" class="item-notes-input" data-item-id="${item.id}" placeholder="Add a note..." value="">`
+                }
+            </div>
             <div class="item-actions">
+                ${!hasNotes ? `<button class="save-notes-btn" data-item-id="${item.id}" title="Save notes">💾</button>` : ''}
                 <button class="edit-item-btn" data-item-id="${item.id}" title="Edit">✏️</button>
                 <button class="delete-item-btn" data-item-id="${item.id}" title="Delete">🗑️</button>
             </div>
@@ -1465,5 +1800,6 @@ window.groceryApp = {
     toggleItem,
     deleteItem,
     startNewList,
-    archiveCurrentList
+    archiveCurrentList,
+    addCommonItems
 };
