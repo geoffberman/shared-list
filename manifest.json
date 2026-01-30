@@ -2,7 +2,7 @@
   "name": "Shared List",
   "short_name": "Shared List",
   "description": "Collaborative shopping list for the Berman family",
-  "start_url": "/grocery/",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#FAF7F2",
   "theme_color": "#4A7C59",
@@ -24,7 +24,7 @@
   "categories": ["shopping", "utilities", "lifestyle"],
   "screenshots": [],
   "share_target": {
-    "action": "/grocery/share",
+    "action": "/share",
     "method": "POST",
     "enctype": "multipart/form-data",
     "params": {
