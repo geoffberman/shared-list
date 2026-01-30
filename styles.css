@@ -126,22 +126,27 @@ body {
 .list-title-wrapper {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+    gap: 0.4rem;
 }
 
 .btn-common-items {
-    font-size: 0.75rem;
-    padding: 0.3rem 0.6rem;
+    font-size: 1rem;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background-color: var(--secondary-color, #f0e6d3);
     border: 1px solid var(--border-color, #ddd);
-    border-radius: 1rem;
+    border-radius: 0.4rem;
     cursor: pointer;
-    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .editable-title {
     cursor: pointer;
+    font-size: 1.2rem;
 }
 
 .editable-title:hover {
