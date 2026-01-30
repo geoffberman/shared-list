@@ -418,7 +418,7 @@ Deno.serve(async (req: Request) => {
               category: autoCategorize(item.name),
               is_checked: false,
               added_by: userId,
-              notes: item.notes || "added via text",
+              notes: item.notes || "",
             }));
 
             const { data: inserted, error: insertError } = await supabase
@@ -513,7 +513,7 @@ Deno.serve(async (req: Request) => {
       category: autoCategorize(item.name),
       is_checked: false,
       added_by: userId,
-      notes: item.notes || "added via text",
+      notes: item.notes || "",
     }));
 
     const { data: insertedItems, error: insertError } = await supabase
