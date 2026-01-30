@@ -1630,7 +1630,21 @@ async function sendFamilyInvite() {
         state.familyMembers.push(invite);
         renderFamilyMembers();
         elements.inviteEmail.value = '';
-        showToast(`Invitation sent to ${email}`, 'success');
+
+        // Send invite email via Edge Function (non-blocking)
+        try {
+            await window.supabase.functions.invoke('send-invite-email', {
+                body: {
+                    email: email,
+                    invited_by: state.currentUser.id,
+                    family_group_id: groupId
+                }
+            });
+            showToast(`Invitation emailed to ${email}`, 'success');
+        } catch (emailErr) {
+            console.warn('Could not send invite email:', emailErr);
+            showToast(`Invitation created for ${email} (email notification unavailable)`, 'success');
+        }
 
     } catch (error) {
         console.error('Error sending invite:', error);
