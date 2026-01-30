@@ -163,6 +163,48 @@ steak and potatoes and salad
 
 ---
 
+## Email Invitations (via Resend)
+
+When you invite a family member, the app sends them an email with a link to join. This uses [Resend](https://resend.com) for email delivery.
+
+### Step 1: Create a Resend Account
+
+1. Sign up at [resend.com](https://resend.com) (free tier: 100 emails/day)
+2. Go to **API Keys** → **Create API Key**
+3. Copy the key (starts with `re_...`)
+
+### Step 2: Store the API Key as a Supabase Secret
+
+```bash
+supabase secrets set RESEND_API_KEY=re_your_api_key_here
+```
+
+### Step 3: Deploy the Email Edge Function
+
+```bash
+supabase functions deploy send-invite-email --no-verify-jwt
+```
+
+### Step 4 (Optional): Custom From Address
+
+By default, emails come from `Shared List <onboarding@resend.dev>` (Resend's test domain). To use your own domain:
+
+1. In Resend → **Domains** → **Add Domain** → follow DNS verification
+2. Set the custom from address:
+   ```bash
+   supabase secrets set FROM_EMAIL="Shared List <noreply@yourdomain.com>"
+   ```
+
+### How It Works
+
+- You enter an email in Settings → Family Group → Send Invite
+- The app creates a `family_members` record with status "pending"
+- The app calls the `send-invite-email` Edge Function
+- The function sends a styled HTML email via Resend with a link to the app
+- When the invitee signs up with that email, the app detects the pending invite and shows an accept prompt
+
+---
+
 ## Troubleshooting
 
 ### "Can't connect to database"

@@ -42,15 +42,27 @@ function autoCategorize(itemName: string): string {
   return "";
 }
 
-// Parse SMS body into individual item names
-function parseItems(body: string): string[] {
+// Parse SMS body into individual items with optional notes in parentheses
+// e.g. "chicken (organic), milk (2%), bread" => [{name:"chicken", notes:"organic"}, ...]
+interface ParsedItem {
+  name: string;
+  notes: string;
+}
+
+function parseItems(body: string): ParsedItem[] {
   // Split on commas, newlines, or "and"
-  const items = body
+  const raw = body
     .split(/[,\n]+|\band\b/i)
     .map((s) => s.trim())
     .filter((s) => s.length > 0 && s.length < 100);
 
-  return items;
+  return raw.map((s) => {
+    const match = s.match(/^(.+?)\s*\((.+?)\)\s*$/);
+    if (match) {
+      return { name: match[1].trim(), notes: match[2].trim() };
+    }
+    return { name: s, notes: "" };
+  });
 }
 
 // Generate a date-based list name (mirrors client-side generateListName)
@@ -396,17 +408,17 @@ Deno.serve(async (req: Request) => {
           );
 
           const nonDupExtras = extraItems.filter(
-            (name) => !existingNewNames.has(name.toLowerCase())
+            (item) => !existingNewNames.has(item.name.toLowerCase())
           );
 
           if (nonDupExtras.length > 0) {
-            const itemsToInsert = nonDupExtras.map((name) => ({
+            const itemsToInsert = nonDupExtras.map((item) => ({
               list_id: newListId,
-              name: name,
-              category: autoCategorize(name),
+              name: item.name,
+              category: autoCategorize(item.name),
               is_checked: false,
               added_by: userId,
-              notes: "added via text",
+              notes: item.notes || "added via text",
             }));
 
             const { data: inserted, error: insertError } = await supabase
@@ -463,9 +475,9 @@ Deno.serve(async (req: Request) => {
     const listId = activeList.listId;
 
     // Parse items from the SMS body
-    const itemNames = parseItems(body);
+    const parsedItems = parseItems(body);
 
-    if (itemNames.length === 0) {
+    if (parsedItems.length === 0) {
       return twimlResponse("Couldn't find any items in your message. Try: milk, eggs, bread");
     }
 
@@ -480,14 +492,14 @@ Deno.serve(async (req: Request) => {
     );
 
     // Filter out duplicates
-    const newItemNames = itemNames.filter(
-      (name) => !existingNames.has(name.toLowerCase())
+    const newItems = parsedItems.filter(
+      (item) => !existingNames.has(item.name.toLowerCase())
     );
-    const skippedNames = itemNames.filter((name) =>
-      existingNames.has(name.toLowerCase())
-    );
+    const skippedNames = parsedItems
+      .filter((item) => existingNames.has(item.name.toLowerCase()))
+      .map((item) => item.name);
 
-    if (newItemNames.length === 0) {
+    if (newItems.length === 0) {
       const skippedList = skippedNames.join(", ");
       return twimlResponse(
         `All items already on your list: ${skippedList}`
@@ -495,13 +507,13 @@ Deno.serve(async (req: Request) => {
     }
 
     // Insert only non-duplicate items
-    const itemsToInsert = newItemNames.map((name) => ({
+    const itemsToInsert = newItems.map((item) => ({
       list_id: listId,
-      name: name,
-      category: autoCategorize(name),
+      name: item.name,
+      category: autoCategorize(item.name),
       is_checked: false,
       added_by: userId,
-      notes: "added via text",
+      notes: item.notes || "added via text",
     }));
 
     const { data: insertedItems, error: insertError } = await supabase
@@ -515,6 +527,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // Log the integration
+    const newItemNames = newItems.map((i) => i.name);
     await supabase.from("integration_log").insert([
       {
         user_id: userId,
@@ -524,7 +537,7 @@ Deno.serve(async (req: Request) => {
       },
     ]);
 
-    const count = insertedItems?.length || newItemNames.length;
+    const count = insertedItems?.length || newItems.length;
     const itemList = newItemNames.join(", ");
     let responseMsg = `Added ${count} item${count !== 1 ? "s" : ""} to your grocery list: ${itemList}`;
     if (skippedNames.length > 0) {

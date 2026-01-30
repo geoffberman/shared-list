@@ -138,8 +138,9 @@ body {
     align-items: center;
     justify-content: center;
     text-align: center;
-    background-color: var(--secondary-color, #f0e6d3);
-    border: 1px solid var(--border-color, #ddd);
+    color: white;
+    background-color: var(--primary-color, #4A7C59);
+    border: 1px solid var(--primary-color, #4A7C59);
     border-radius: 0.4rem;
     cursor: pointer;
     flex-shrink: 0;
