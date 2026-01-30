@@ -1792,13 +1792,8 @@ function showSmsInstructions() {
     if (elements.smsInstructions) {
         elements.smsInstructions.classList.remove('hidden');
     }
-    // The Twilio number is configured in the environment
-    // Display it from a data attribute or config
-    const twilioNumber = document.body.dataset.smsNumber || localStorage.getItem('smsNumber');
-    if (twilioNumber && elements.smsNumber) {
-        elements.smsNumber.textContent = twilioNumber;
-    } else if (elements.smsNumber) {
-        elements.smsNumber.textContent = 'Set in app config';
+    if (elements.smsNumber) {
+        elements.smsNumber.textContent = '(973) 240-5157';
     }
 }
 
