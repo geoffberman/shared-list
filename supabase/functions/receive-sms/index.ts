@@ -385,22 +385,38 @@ Deno.serve(async (req: Request) => {
       if (remainingText.length > 0) {
         const extraItems = parseItems(remainingText);
         if (extraItems.length > 0) {
-          const itemsToInsert = extraItems.map((name) => ({
-            list_id: newListId,
-            name: name,
-            category: autoCategorize(name),
-            is_checked: false,
-            added_by: userId,
-            notes: "added via text",
-          }));
-
-          const { data: inserted, error: insertError } = await supabase
+          // Check for duplicates against common items already added
+          const { data: existingOnNew } = await supabase
             .from("grocery_items")
-            .insert(itemsToInsert)
-            .select();
+            .select("name")
+            .eq("list_id", newListId);
 
-          if (!insertError && inserted) {
-            extraItemCount = inserted.length;
+          const existingNewNames = new Set(
+            (existingOnNew || []).map((i) => i.name.toLowerCase())
+          );
+
+          const nonDupExtras = extraItems.filter(
+            (name) => !existingNewNames.has(name.toLowerCase())
+          );
+
+          if (nonDupExtras.length > 0) {
+            const itemsToInsert = nonDupExtras.map((name) => ({
+              list_id: newListId,
+              name: name,
+              category: autoCategorize(name),
+              is_checked: false,
+              added_by: userId,
+              notes: "added via text",
+            }));
+
+            const { data: inserted, error: insertError } = await supabase
+              .from("grocery_items")
+              .insert(itemsToInsert)
+              .select();
+
+            if (!insertError && inserted) {
+              extraItemCount = inserted.length;
+            }
           }
         }
       }
@@ -453,8 +469,33 @@ Deno.serve(async (req: Request) => {
       return twimlResponse("Couldn't find any items in your message. Try: milk, eggs, bread");
     }
 
-    // Insert items into the list
-    const itemsToInsert = itemNames.map((name) => ({
+    // Fetch existing items on the list to check for duplicates
+    const { data: existingItems } = await supabase
+      .from("grocery_items")
+      .select("name")
+      .eq("list_id", listId);
+
+    const existingNames = new Set(
+      (existingItems || []).map((i) => i.name.toLowerCase())
+    );
+
+    // Filter out duplicates
+    const newItemNames = itemNames.filter(
+      (name) => !existingNames.has(name.toLowerCase())
+    );
+    const skippedNames = itemNames.filter((name) =>
+      existingNames.has(name.toLowerCase())
+    );
+
+    if (newItemNames.length === 0) {
+      const skippedList = skippedNames.join(", ");
+      return twimlResponse(
+        `All items already on your list: ${skippedList}`
+      );
+    }
+
+    // Insert only non-duplicate items
+    const itemsToInsert = newItemNames.map((name) => ({
       list_id: listId,
       name: name,
       category: autoCategorize(name),
@@ -479,15 +520,17 @@ Deno.serve(async (req: Request) => {
         user_id: userId,
         source: "sms",
         raw_message: body,
-        items_added: itemNames,
+        items_added: newItemNames,
       },
     ]);
 
-    const count = insertedItems?.length || itemNames.length;
-    const itemList = itemNames.join(", ");
-    return twimlResponse(
-      `Added ${count} item${count !== 1 ? "s" : ""} to your grocery list: ${itemList}`
-    );
+    const count = insertedItems?.length || newItemNames.length;
+    const itemList = newItemNames.join(", ");
+    let responseMsg = `Added ${count} item${count !== 1 ? "s" : ""} to your grocery list: ${itemList}`;
+    if (skippedNames.length > 0) {
+      responseMsg += `. Already on list: ${skippedNames.join(", ")}`;
+    }
+    return twimlResponse(responseMsg);
   } catch (error) {
     console.error("SMS webhook error:", error);
     return twimlResponse("Sorry, something went wrong. Please try again.");

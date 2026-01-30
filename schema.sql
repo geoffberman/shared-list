@@ -236,13 +236,26 @@ CREATE POLICY "Users can create family groups"
     ON family_groups FOR INSERT
     WITH CHECK (auth.uid() = created_by);
 
+-- Helper function to look up family group IDs without triggering RLS recursion
+CREATE OR REPLACE FUNCTION get_user_family_group_ids(uid UUID)
+RETURNS SETOF UUID
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT family_group_id FROM family_members WHERE user_id = uid;
+$$;
+
 -- Family Members Policies
+-- Note: Uses auth.jwt() ->> 'email' instead of SELECT FROM auth.users (which
+-- is not accessible to authenticated role), and get_user_family_group_ids()
+-- to avoid infinite recursion in the self-referencing subquery.
 CREATE POLICY "Users can view their family members"
     ON family_members FOR SELECT
     USING (
         user_id = auth.uid()
-        OR email = (SELECT email FROM auth.users WHERE id = auth.uid())
-        OR family_group_id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
+        OR email = (auth.jwt() ->> 'email')
+        OR family_group_id IN (SELECT get_user_family_group_ids(auth.uid()))
     );
 
 CREATE POLICY "Users can invite family members"
@@ -254,7 +267,7 @@ CREATE POLICY "Users can invite family members"
 CREATE POLICY "Users can accept their own invites"
     ON family_members FOR UPDATE
     USING (
-        email = (SELECT email FROM auth.users WHERE id = auth.uid())
+        email = (auth.jwt() ->> 'email')
     );
 
 -- Integration Log Policies
