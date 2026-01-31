@@ -93,12 +93,13 @@ async function findActiveList(
 
   if (membership) {
     // Look for the family's shared active list (tagged with family_id)
+    // Use updated_at so the most recently modified list is selected
     const { data: familyList } = await supabase
       .from("grocery_lists")
       .select("id, user_id")
       .eq("family_id", membership.family_group_id)
       .eq("is_archived", false)
-      .order("created_at", { ascending: false })
+      .order("updated_at", { ascending: false })
       .limit(1)
       .single();
 
@@ -120,7 +121,7 @@ async function findActiveList(
         .select("id, user_id")
         .in("user_id", memberIds)
         .eq("is_archived", false)
-        .order("created_at", { ascending: false })
+        .order("updated_at", { ascending: false })
         .limit(1)
         .single();
 
@@ -136,7 +137,7 @@ async function findActiveList(
     .select("id, user_id")
     .eq("user_id", userId)
     .eq("is_archived", false)
-    .order("created_at", { ascending: false })
+    .order("updated_at", { ascending: false })
     .limit(1)
     .single();
 
@@ -473,6 +474,11 @@ Deno.serve(async (req: Request) => {
 
             if (!insertError && inserted) {
               extraItemCount = inserted.length;
+              // Bump updated_at on the new list after adding extra items
+              await supabase
+                .from("grocery_lists")
+                .update({ updated_at: new Date().toISOString() })
+                .eq("id", newListId);
             }
           }
         }
@@ -570,6 +576,13 @@ Deno.serve(async (req: Request) => {
       console.error("Error inserting items:", insertError);
       return twimlResponse("Sorry, something went wrong adding your items. Try again.");
     }
+
+    // Bump the list's updated_at so it's recognized as the most recently
+    // modified list when any family member opens the app
+    await supabase
+      .from("grocery_lists")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", listId);
 
     // Log the integration
     const newItemNames = newItems.map((i) => i.name);

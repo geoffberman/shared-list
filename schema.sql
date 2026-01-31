@@ -127,10 +127,14 @@ CREATE INDEX IF NOT EXISTS idx_family_groups_created_by ON family_groups(created
 CREATE INDEX IF NOT EXISTS idx_family_members_family_group_id ON family_members(family_group_id);
 CREATE INDEX IF NOT EXISTS idx_family_members_email ON family_members(email);
 
--- Unique constraint: Only one active (non-archived) list per user
-CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_list_per_user
-    ON grocery_lists(user_id)
-    WHERE is_archived = FALSE;
+-- NOTE: The old unique constraint (idx_unique_active_list_per_user) that
+-- limited each user to one active list has been removed. The application
+-- now handles list lifecycle properly: when a new list is created,
+-- existing active lists are archived first. The constraint caused silent
+-- insert failures in edge cases (e.g. family_id mismatch on reload).
+--
+-- To drop the old constraint from an existing database, run:
+--   DROP INDEX IF EXISTS idx_unique_active_list_per_user;
 
 -- Row Level Security (RLS) Policies
 
