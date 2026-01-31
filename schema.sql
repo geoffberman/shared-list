@@ -116,6 +116,18 @@ CREATE TABLE IF NOT EXISTS integration_log (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Item Category Overrides Table
+-- When a user recategorizes an item, save the mapping so future adds use it
+CREATE TABLE IF NOT EXISTS item_category_overrides (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    item_name TEXT NOT NULL, -- lowercase normalized name
+    category TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(user_id, item_name)
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_grocery_lists_user_id ON grocery_lists(user_id);
 CREATE INDEX IF NOT EXISTS idx_grocery_lists_archived ON grocery_lists(is_archived);
@@ -126,6 +138,7 @@ CREATE INDEX IF NOT EXISTS idx_frequent_items_frequency ON frequent_items(freque
 CREATE INDEX IF NOT EXISTS idx_family_groups_created_by ON family_groups(created_by);
 CREATE INDEX IF NOT EXISTS idx_family_members_family_group_id ON family_members(family_group_id);
 CREATE INDEX IF NOT EXISTS idx_family_members_email ON family_members(email);
+CREATE INDEX IF NOT EXISTS idx_item_category_overrides_user ON item_category_overrides(user_id);
 
 -- NOTE: The old unique constraint (idx_unique_active_list_per_user) that
 -- limited each user to one active list has been removed. The application
@@ -145,6 +158,7 @@ ALTER TABLE frequent_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE family_groups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE family_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE integration_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE item_category_overrides ENABLE ROW LEVEL SECURITY;
 
 -- Grocery Lists Policies
 -- Users can read their own lists, lists tagged with their family_id,
@@ -256,6 +270,24 @@ CREATE POLICY "Users can view their own frequent items"
 
 CREATE POLICY "Users can manage their own frequent items"
     ON frequent_items FOR ALL
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+-- Item Category Overrides Policies
+-- Users can view their own overrides + overrides from family members
+CREATE POLICY "Users can view category overrides"
+    ON item_category_overrides FOR SELECT
+    USING (
+        auth.uid() = user_id
+        OR user_id IN (
+            SELECT fm2.user_id FROM family_members fm1
+            JOIN family_members fm2 ON fm1.family_group_id = fm2.family_group_id
+            WHERE fm1.user_id = auth.uid() AND fm2.status = 'accepted'
+        )
+    );
+
+CREATE POLICY "Users can manage their own category overrides"
+    ON item_category_overrides FOR ALL
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
 

@@ -42,6 +42,71 @@ function autoCategorize(itemName: string): string {
   return "";
 }
 
+// Load category overrides for a user (and their family members)
+async function loadCategoryOverrides(
+  supabase: ReturnType<typeof createClient>,
+  userId: string
+): Promise<Record<string, string>> {
+  const overrides: Record<string, string> = {};
+
+  // Check if user is in a family group
+  const { data: membership } = await supabase
+    .from("family_members")
+    .select("family_group_id")
+    .eq("user_id", userId)
+    .eq("status", "accepted")
+    .limit(1)
+    .single();
+
+  let query = supabase
+    .from("item_category_overrides")
+    .select("item_name, category, updated_at")
+    .order("updated_at", { ascending: false });
+
+  if (membership) {
+    // Include overrides from all family members
+    const { data: members } = await supabase
+      .from("family_members")
+      .select("user_id")
+      .eq("family_group_id", membership.family_group_id)
+      .eq("status", "accepted");
+
+    const memberIds = (members || []).map((m) => m.user_id).filter(Boolean);
+    if (memberIds.length > 0) {
+      query = query.in("user_id", memberIds);
+    } else {
+      query = query.eq("user_id", userId);
+    }
+  } else {
+    query = query.eq("user_id", userId);
+  }
+
+  const { data } = await query;
+  if (data) {
+    for (const row of data) {
+      const key = row.item_name.toLowerCase();
+      // First occurrence is the most recent due to order
+      if (!overrides[key]) {
+        overrides[key] = row.category;
+      }
+    }
+  }
+
+  return overrides;
+}
+
+// Categorize an item using overrides first, then regex fallback
+function categorizeItem(
+  itemName: string,
+  overrides: Record<string, string>
+): string {
+  const key = itemName.toLowerCase();
+  if (overrides[key]) {
+    return overrides[key];
+  }
+  return autoCategorize(itemName);
+}
+
 // Parse SMS body into individual items with optional notes in parentheses
 // e.g. "chicken (organic), milk (2%), bread" => [{name:"chicken", notes:"organic"}, ...]
 interface ParsedItem {
@@ -276,7 +341,8 @@ async function getFrequentItems(
 async function archiveAndStartNewList(
   supabase: ReturnType<typeof createClient>,
   userId: string,
-  activeListId: string | null
+  activeListId: string | null,
+  categoryOverrides: Record<string, string> = {}
 ): Promise<{ newListId: string; commonItemCount: number; archivedOld: boolean }> {
   let archivedOld = false;
 
@@ -360,7 +426,7 @@ async function archiveAndStartNewList(
     const itemsToInsert = commonItemsToAdd.map((item) => ({
       list_id: newList.id,
       name: item.name,
-      category: item.category || autoCategorize(item.name),
+      category: item.category || categorizeItem(item.name, categoryOverrides),
       quantity: item.quantity || null,
       is_checked: false,
       added_by: userId,
@@ -424,6 +490,9 @@ Deno.serve(async (req: Request) => {
 
     const userId = phoneRecord.user_id;
 
+    // Load category overrides for this user (and family members)
+    const categoryOverrides = await loadCategoryOverrides(supabase, userId);
+
     // Check if this is a "start new list" command
     const lines = body.split("\n").map((l) => l.trim());
     const firstLine = lines[0].toLowerCase();
@@ -434,7 +503,7 @@ Deno.serve(async (req: Request) => {
       const activeList = await findActiveList(supabase, userId);
 
       const { newListId, commonItemCount, archivedOld } =
-        await archiveAndStartNewList(supabase, userId, activeList?.listId || null);
+        await archiveAndStartNewList(supabase, userId, activeList?.listId || null, categoryOverrides);
 
       // Parse any additional items from remaining lines
       const remainingText = lines.slice(1).join("\n").trim();
@@ -461,7 +530,7 @@ Deno.serve(async (req: Request) => {
             const itemsToInsert = nonDupExtras.map((item) => ({
               list_id: newListId,
               name: item.name,
-              category: autoCategorize(item.name),
+              category: categorizeItem(item.name, categoryOverrides),
               is_checked: false,
               added_by: userId,
               notes: item.notes || "",
@@ -561,7 +630,7 @@ Deno.serve(async (req: Request) => {
     const itemsToInsert = newItems.map((item) => ({
       list_id: listId,
       name: item.name,
-      category: autoCategorize(item.name),
+      category: categorizeItem(item.name, categoryOverrides),
       is_checked: false,
       added_by: userId,
       notes: item.notes || "",
