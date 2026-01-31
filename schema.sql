@@ -143,12 +143,18 @@ ALTER TABLE family_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE integration_log ENABLE ROW LEVEL SECURITY;
 
 -- Grocery Lists Policies
--- Users can read their own lists and lists from their family
+-- Users can read their own lists, lists tagged with their family_id,
+-- AND lists owned by any member of their family group (even if family_id isn't set)
 CREATE POLICY "Users can view their own lists"
     ON grocery_lists FOR SELECT
     USING (
         auth.uid() = user_id
         OR family_id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
+        OR user_id IN (
+            SELECT fm2.user_id FROM family_members fm1
+            JOIN family_members fm2 ON fm1.family_group_id = fm2.family_group_id
+            WHERE fm1.user_id = auth.uid() AND fm2.status = 'accepted'
+        )
     );
 
 -- Users can insert their own lists
@@ -156,12 +162,17 @@ CREATE POLICY "Users can create lists"
     ON grocery_lists FOR INSERT
     WITH CHECK (auth.uid() = user_id);
 
--- Users can update their own lists
+-- Users can update their own lists and family lists
 CREATE POLICY "Users can update their own lists"
     ON grocery_lists FOR UPDATE
     USING (
         auth.uid() = user_id
         OR family_id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
+        OR user_id IN (
+            SELECT fm2.user_id FROM family_members fm1
+            JOIN family_members fm2 ON fm1.family_group_id = fm2.family_group_id
+            WHERE fm1.user_id = auth.uid() AND fm2.status = 'accepted'
+        )
     );
 
 -- Users can delete their own lists
@@ -170,7 +181,7 @@ CREATE POLICY "Users can delete their own lists"
     USING (auth.uid() = user_id);
 
 -- Grocery Items Policies
--- Users can view items in their lists
+-- Users can view items in their lists and family lists
 CREATE POLICY "Users can view items in their lists"
     ON grocery_items FOR SELECT
     USING (
@@ -178,10 +189,15 @@ CREATE POLICY "Users can view items in their lists"
             SELECT id FROM grocery_lists
             WHERE user_id = auth.uid()
             OR family_id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
+            OR user_id IN (
+                SELECT fm2.user_id FROM family_members fm1
+                JOIN family_members fm2 ON fm1.family_group_id = fm2.family_group_id
+                WHERE fm1.user_id = auth.uid() AND fm2.status = 'accepted'
+            )
         )
     );
 
--- Users can add items to their lists
+-- Users can add items to their lists and family lists
 CREATE POLICY "Users can add items to their lists"
     ON grocery_items FOR INSERT
     WITH CHECK (
@@ -189,10 +205,15 @@ CREATE POLICY "Users can add items to their lists"
             SELECT id FROM grocery_lists
             WHERE user_id = auth.uid()
             OR family_id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
+            OR user_id IN (
+                SELECT fm2.user_id FROM family_members fm1
+                JOIN family_members fm2 ON fm1.family_group_id = fm2.family_group_id
+                WHERE fm1.user_id = auth.uid() AND fm2.status = 'accepted'
+            )
         )
     );
 
--- Users can update items in their lists
+-- Users can update items in their lists and family lists
 CREATE POLICY "Users can update items in their lists"
     ON grocery_items FOR UPDATE
     USING (
@@ -200,10 +221,15 @@ CREATE POLICY "Users can update items in their lists"
             SELECT id FROM grocery_lists
             WHERE user_id = auth.uid()
             OR family_id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
+            OR user_id IN (
+                SELECT fm2.user_id FROM family_members fm1
+                JOIN family_members fm2 ON fm1.family_group_id = fm2.family_group_id
+                WHERE fm1.user_id = auth.uid() AND fm2.status = 'accepted'
+            )
         )
     );
 
--- Users can delete items from their lists
+-- Users can delete items from their lists and family lists
 CREATE POLICY "Users can delete items from their lists"
     ON grocery_items FOR DELETE
     USING (
@@ -211,6 +237,11 @@ CREATE POLICY "Users can delete items from their lists"
             SELECT id FROM grocery_lists
             WHERE user_id = auth.uid()
             OR family_id IN (SELECT family_group_id FROM family_members WHERE user_id = auth.uid())
+            OR user_id IN (
+                SELECT fm2.user_id FROM family_members fm1
+                JOIN family_members fm2 ON fm1.family_group_id = fm2.family_group_id
+                WHERE fm1.user_id = auth.uid() AND fm2.status = 'accepted'
+            )
         )
     );
 
