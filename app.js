@@ -598,19 +598,20 @@ async function loadFromDatabase() {
 
         if (state.familyGroupId) {
             // FAMILY MODE: All family members must converge on ONE shared list.
-            // Get ALL active lists with family_id (there may be duplicates from
-            // a previous bug). Keep the oldest one, archive the rest.
+            // Get ALL active lists with family_id (there may be duplicates).
+            // Keep the most recent one, archive the rest — so any member
+            // creating a new list makes it the active list for everyone.
             const { data: familyLists, error: famErr } = await window.supabase
                 .from('grocery_lists')
                 .select('*')
                 .eq('is_archived', false)
                 .eq('family_id', state.familyGroupId)
-                .order('created_at', { ascending: true });
+                .order('created_at', { ascending: false });
 
             if (famErr) throw famErr;
 
             if (familyLists && familyLists.length > 0) {
-                // Use the oldest family list (the original)
+                // Use the most recent family list
                 foundList = familyLists[0];
 
                 // Archive any duplicate active family lists
