@@ -606,7 +606,7 @@ async function loadFromDatabase() {
                 .select('*')
                 .eq('is_archived', false)
                 .eq('family_id', state.familyGroupId)
-                .order('created_at', { ascending: false });
+                .order('updated_at', { ascending: false });
 
             if (famErr) throw famErr;
 
@@ -671,7 +671,7 @@ async function loadFromDatabase() {
                         .select('*')
                         .in('user_id', memberIds)
                         .eq('is_archived', false)
-                        .order('created_at', { ascending: false })
+                        .order('updated_at', { ascending: false })
                         .limit(1);
 
                     if (memberLists && memberLists.length > 0) {
@@ -694,13 +694,39 @@ async function loadFromDatabase() {
                 .select('*')
                 .eq('is_archived', false)
                 .eq('user_id', state.currentUser.id)
-                .order('created_at', { ascending: false })
+                .order('updated_at', { ascending: false })
                 .limit(1);
 
             if (listsError) throw listsError;
 
             if (lists && lists.length > 0) {
                 foundList = lists[0];
+            }
+        }
+
+        // Last-resort fallback: if no list was found through family or solo
+        // queries, look for ANY active list owned by this user regardless of
+        // family_id. This prevents losing a list when family_id tagging is
+        // inconsistent or the user's family membership state changes.
+        if (!foundList) {
+            const { data: anyActive } = await window.supabase
+                .from('grocery_lists')
+                .select('*')
+                .eq('is_archived', false)
+                .eq('user_id', state.currentUser.id)
+                .order('updated_at', { ascending: false })
+                .limit(1);
+
+            if (anyActive && anyActive.length > 0) {
+                foundList = anyActive[0];
+                // Tag it with the family_id if we're in family mode
+                if (state.familyGroupId && !foundList.family_id) {
+                    await window.supabase
+                        .from('grocery_lists')
+                        .update({ family_id: state.familyGroupId })
+                        .eq('id', foundList.id);
+                    foundList.family_id = state.familyGroupId;
+                }
             }
         }
 
@@ -726,7 +752,7 @@ async function loadFromDatabase() {
                 return item;
             });
         } else {
-            // Create a new list
+            // Truly no active list exists — create one
             await createNewList();
         }
 
@@ -909,6 +935,43 @@ async function createNewList(autoAddFrequent = true) {
 
     if (window.supabase && state.currentUser) {
         try {
+            // Archive any existing active lists for this user before creating
+            // a new one. This ensures the DB unique constraint
+            // (one active list per user) is satisfied, and superseded lists
+            // are preserved in the archive rather than lost.
+            const { data: existingActive } = await window.supabase
+                .from('grocery_lists')
+                .select('*')
+                .eq('user_id', state.currentUser.id)
+                .eq('is_archived', false);
+
+            for (const old of (existingActive || [])) {
+                await window.supabase
+                    .from('grocery_lists')
+                    .update({
+                        is_archived: true,
+                        archived_at: new Date().toISOString(),
+                        family_id: old.family_id || state.familyGroupId || null
+                    })
+                    .eq('id', old.id);
+
+                // Add to local archived lists so it's immediately visible
+                // in the archive UI without a full reload
+                const { data: oldItems } = await window.supabase
+                    .from('grocery_items')
+                    .select('*')
+                    .eq('list_id', old.id);
+
+                if (oldItems && oldItems.length > 0) {
+                    state.archivedLists.unshift({
+                        ...old,
+                        is_archived: true,
+                        archived_at: new Date().toISOString(),
+                        items: oldItems
+                    });
+                }
+            }
+
             const listData = {
                 user_id: state.currentUser.id,
                 name: listName,
@@ -988,7 +1051,7 @@ async function startNewList() {
     }
 
     await createNewList(true);
-    showToast('New list created', 'success');
+    showToast('List archived — new list created', 'success');
 }
 
 async function archiveCurrentList() {
@@ -1016,8 +1079,6 @@ async function archiveCurrentList() {
                 items: [...state.items]
             });
 
-            await loadFromDatabase();
-
         } catch (error) {
             console.error('Error archiving list:', error);
             archiveListLocally();
@@ -1025,9 +1086,6 @@ async function archiveCurrentList() {
     } else {
         archiveListLocally();
     }
-
-    await createNewList(true);
-    showToast('List archived', 'success');
 }
 
 function archiveListLocally() {
@@ -1349,6 +1407,13 @@ async function addItemToDatabase(item) {
             .single();
 
         if (error) throw error;
+
+        // Bump the list's updated_at so it's recognized as the most recently
+        // modified list when the app reloads or another family member opens it
+        await window.supabase
+            .from('grocery_lists')
+            .update({ updated_at: new Date().toISOString() })
+            .eq('id', state.currentList.id);
 
         state.items.push(data);
         renderItems();
