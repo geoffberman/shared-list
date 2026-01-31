@@ -13,6 +13,7 @@ const state = {
     archivedLists: [],
     familyMembers: [],
     familyGroupId: null,
+    categoryOverrides: {},  // { lowercase_item_name: category }
     settings: {
         autoAddFrequent: true,
         groupByCategory: false
@@ -776,6 +777,29 @@ async function loadFromDatabase() {
             state.frequentItems = [];
         }
 
+        // Load category overrides (user's own + family members')
+        try {
+            const { data: overrides, error: overridesError } = await window.supabase
+                .from('item_category_overrides')
+                .select('item_name, category, updated_at')
+                .order('updated_at', { ascending: false });
+
+            if (!overridesError && overrides) {
+                // Build map keyed by lowercase item name.
+                // Because we order by updated_at DESC, the first occurrence
+                // for each name is the most recent override.
+                state.categoryOverrides = {};
+                for (const row of overrides) {
+                    const key = row.item_name.toLowerCase();
+                    if (!state.categoryOverrides[key]) {
+                        state.categoryOverrides[key] = row.category;
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Could not load category overrides:', e.message);
+        }
+
         // Load archived lists with their items (own + family)
         let archivedQuery = window.supabase
             .from('grocery_lists')
@@ -825,6 +849,7 @@ async function loadFromLocalStorage() {
         state.items = data.items || [];
         state.frequentItems = data.frequentItems || [];
         state.archivedLists = data.archivedLists || [];
+        state.categoryOverrides = data.categoryOverrides || {};
     } else {
         // Initialize new list
         state.currentList = {
@@ -847,7 +872,8 @@ function saveToLocalStorage() {
         currentList: state.currentList,
         items: state.items,
         frequentItems: state.frequentItems,
-        archivedLists: state.archivedLists
+        archivedLists: state.archivedLists,
+        categoryOverrides: state.categoryOverrides
     };
     localStorage.setItem('groceryListData', JSON.stringify(data));
 }
@@ -1519,10 +1545,17 @@ async function saveEditedItem() {
         return;
     }
 
+    const oldCategory = item.category;
     item.name = newName;
     item.quantity = newQuantity;
     item.category = newCategory;
     item.notes = newNotes;
+
+    // If category changed, save the override so future adds use this category
+    const categoryChanged = newCategory && newCategory !== oldCategory;
+    if (categoryChanged) {
+        saveCategoryOverride(newName, newCategory);
+    }
 
     if (window.supabase && state.currentUser && state.currentList?.id) {
         try {
@@ -1549,6 +1582,47 @@ async function saveEditedItem() {
     closeEditModal();
     renderItems();
     showToast('Item updated', 'success');
+}
+
+async function saveCategoryOverride(itemName, category) {
+    const key = itemName.toLowerCase();
+
+    // Update local state immediately
+    state.categoryOverrides[key] = category;
+    saveToLocalStorage();
+
+    // Also update the frequent_items table if this item exists there
+    if (window.supabase && state.currentUser) {
+        try {
+            // Upsert the override in the database
+            await window.supabase
+                .from('item_category_overrides')
+                .upsert({
+                    user_id: state.currentUser.id,
+                    item_name: key,
+                    category: category,
+                    updated_at: new Date().toISOString()
+                }, {
+                    onConflict: 'user_id,item_name'
+                });
+
+            // Keep frequent_items in sync
+            await window.supabase
+                .from('frequent_items')
+                .update({ category: category })
+                .eq('user_id', state.currentUser.id)
+                .ilike('name', key);
+
+        } catch (error) {
+            console.error('Error saving category override:', error);
+        }
+    }
+
+    // Update local frequent items too
+    const fi = state.frequentItems.find(f => f.name.toLowerCase() === key);
+    if (fi) {
+        fi.category = category;
+    }
 }
 
 async function saveInlineNotes(itemId) {
@@ -2038,6 +2112,11 @@ function showSmsInstructions() {
 
 function autoCategorize(itemName) {
     const name = itemName.toLowerCase();
+
+    // Check user/family category overrides first
+    if (state.categoryOverrides[name]) {
+        return state.categoryOverrides[name];
+    }
 
     // Bakery
     if (/bread|bun\b|rolls?\b|bagel|croissant|muffin|donut|cake\b|cookie|pastry|biscuit|scone|waffle|pancake|tortilla|pita/.test(name)) {
