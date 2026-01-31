@@ -77,12 +77,60 @@ function generateListName(existingTodayCount: number): string {
   return `${dateStr} #${sequenceNum}`;
 }
 
-// Find the user's active list (own or family group's)
+// Find the user's active list (prioritizes shared family list)
 async function findActiveList(
   supabase: ReturnType<typeof createClient>,
   userId: string
 ): Promise<{ listId: string; listOwnerId: string } | null> {
-  // First try: user's own active list
+  // Check if user is in a family group first
+  const { data: membership } = await supabase
+    .from("family_members")
+    .select("family_group_id")
+    .eq("user_id", userId)
+    .eq("status", "accepted")
+    .limit(1)
+    .single();
+
+  if (membership) {
+    // Look for the family's shared active list (tagged with family_id)
+    const { data: familyList } = await supabase
+      .from("grocery_lists")
+      .select("id, user_id")
+      .eq("family_id", membership.family_group_id)
+      .eq("is_archived", false)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (familyList) {
+      return { listId: familyList.id, listOwnerId: familyList.user_id };
+    }
+
+    // Fallback: look for any family member's active list
+    const { data: familyMembers } = await supabase
+      .from("family_members")
+      .select("user_id")
+      .eq("family_group_id", membership.family_group_id)
+      .eq("status", "accepted");
+
+    if (familyMembers) {
+      const memberIds = familyMembers.map((m) => m.user_id).filter(Boolean);
+      const { data: memberList } = await supabase
+        .from("grocery_lists")
+        .select("id, user_id")
+        .in("user_id", memberIds)
+        .eq("is_archived", false)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (memberList) {
+        return { listId: memberList.id, listOwnerId: memberList.user_id };
+      }
+    }
+  }
+
+  // Solo mode: user's own active list
   const { data: ownList } = await supabase
     .from("grocery_lists")
     .select("id, user_id")
@@ -96,39 +144,6 @@ async function findActiveList(
     return { listId: ownList.id, listOwnerId: ownList.user_id };
   }
 
-  // Check if user is in a family group and find the group's active list
-  const { data: membership } = await supabase
-    .from("family_members")
-    .select("family_group_id")
-    .eq("user_id", userId)
-    .eq("status", "accepted")
-    .limit(1)
-    .single();
-
-  if (membership) {
-    const { data: familyMembers } = await supabase
-      .from("family_members")
-      .select("user_id")
-      .eq("family_group_id", membership.family_group_id)
-      .eq("status", "accepted");
-
-    if (familyMembers) {
-      const memberIds = familyMembers.map((m) => m.user_id).filter(Boolean);
-      const { data: familyList } = await supabase
-        .from("grocery_lists")
-        .select("id, user_id")
-        .in("user_id", memberIds)
-        .eq("is_archived", false)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
-
-      if (familyList) {
-        return { listId: familyList.id, listOwnerId: familyList.user_id };
-      }
-    }
-  }
-
   return null;
 }
 
@@ -138,14 +153,32 @@ async function getCommonItemsFromHistory(
   supabase: ReturnType<typeof createClient>,
   userId: string
 ): Promise<Array<{ name: string; category: string; quantity: string }>> {
-  // Fetch recent archived lists with their items
-  const { data: archivedLists } = await supabase
+  // Check if user is in a family group to include family archives
+  const { data: membership } = await supabase
+    .from("family_members")
+    .select("family_group_id")
+    .eq("user_id", userId)
+    .eq("status", "accepted")
+    .limit(1)
+    .single();
+
+  // Fetch recent archived lists with their items (own + family)
+  let archiveQuery = supabase
     .from("grocery_lists")
     .select("id, grocery_items(name, category, quantity)")
-    .eq("user_id", userId)
     .eq("is_archived", true)
     .order("archived_at", { ascending: false })
     .limit(10);
+
+  if (membership) {
+    archiveQuery = archiveQuery.or(
+      `user_id.eq.${userId},family_id.eq.${membership.family_group_id}`
+    );
+  } else {
+    archiveQuery = archiveQuery.eq("user_id", userId);
+  }
+
+  const { data: archivedLists } = await archiveQuery;
 
   if (!archivedLists || archivedLists.length < 2) {
     return [];

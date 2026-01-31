@@ -594,26 +594,89 @@ async function loadFromDatabase() {
     }
 
     try {
-        // Load current list (own lists + family lists if in a family group)
-        let activeListQuery = window.supabase
-            .from('grocery_lists')
-            .select('*')
-            .eq('is_archived', false)
-            .order('created_at', { ascending: false })
-            .limit(1);
+        let foundList = null;
 
         if (state.familyGroupId) {
-            activeListQuery = activeListQuery.or(`user_id.eq.${state.currentUser.id},family_id.eq.${state.familyGroupId}`);
+            // FAMILY MODE: Find the shared family list first
+            // Step 1: Look for an active list tagged with family_id
+            const { data: familyLists, error: famErr } = await window.supabase
+                .from('grocery_lists')
+                .select('*')
+                .eq('is_archived', false)
+                .eq('family_id', state.familyGroupId)
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+            if (famErr) throw famErr;
+
+            if (familyLists && familyLists.length > 0) {
+                foundList = familyLists[0];
+
+                // If user also has a separate personal active list, archive it
+                // so everyone converges on the single family list
+                if (foundList.user_id !== state.currentUser.id) {
+                    const { data: personalLists } = await window.supabase
+                        .from('grocery_lists')
+                        .select('*')
+                        .eq('user_id', state.currentUser.id)
+                        .eq('is_archived', false);
+
+                    for (const personal of (personalLists || [])) {
+                        if (personal.id !== foundList.id) {
+                            await window.supabase
+                                .from('grocery_lists')
+                                .update({
+                                    is_archived: true,
+                                    archived_at: new Date().toISOString(),
+                                    family_id: state.familyGroupId
+                                })
+                                .eq('id', personal.id);
+                        }
+                    }
+                }
+            } else {
+                // No family list yet — use user's own active list and tag it
+                const { data: ownLists, error: ownErr } = await window.supabase
+                    .from('grocery_lists')
+                    .select('*')
+                    .eq('user_id', state.currentUser.id)
+                    .eq('is_archived', false)
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+
+                if (ownErr) throw ownErr;
+
+                if (ownLists && ownLists.length > 0) {
+                    foundList = ownLists[0];
+                    // Tag it as the family list
+                    if (!foundList.family_id) {
+                        await window.supabase
+                            .from('grocery_lists')
+                            .update({ family_id: state.familyGroupId })
+                            .eq('id', foundList.id);
+                        foundList.family_id = state.familyGroupId;
+                    }
+                }
+            }
         } else {
-            activeListQuery = activeListQuery.eq('user_id', state.currentUser.id);
+            // SOLO MODE: Just get the user's own active list
+            const { data: lists, error: listsError } = await window.supabase
+                .from('grocery_lists')
+                .select('*')
+                .eq('is_archived', false)
+                .eq('user_id', state.currentUser.id)
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+            if (listsError) throw listsError;
+
+            if (lists && lists.length > 0) {
+                foundList = lists[0];
+            }
         }
 
-        const { data: lists, error: listsError } = await activeListQuery;
-
-        if (listsError) throw listsError;
-
-        if (lists && lists.length > 0) {
-            state.currentList = lists[0];
+        if (foundList) {
+            state.currentList = foundList;
 
             // Load items for current list
             const { data: items, error: itemsError } = await window.supabase
@@ -1552,6 +1615,10 @@ async function loadFamilyMembers() {
         if (memberships && memberships.length > 0) {
             state.familyGroupId = memberships[0].family_group_id;
 
+            // Retroactively tag any untagged lists with family_id
+            // This ensures lists created before joining the family are shared
+            await migrateUserListsToFamily(state.familyGroupId);
+
             // Load all members of the group
             const { data: members, error: groupError } = await window.supabase
                 .from('family_members')
@@ -1615,12 +1682,10 @@ async function sendFamilyInvite() {
             groupId = group.id;
             state.familyGroupId = groupId;
 
-            // Tag the current active list with the family group
-            if (state.currentList?.id) {
-                await window.supabase
-                    .from('grocery_lists')
-                    .update({ family_id: groupId })
-                    .eq('id', state.currentList.id);
+            // Tag ALL of this user's lists (active + archived) with family_id
+            // so the entire history is shared with family members
+            await migrateUserListsToFamily(groupId);
+            if (state.currentList) {
                 state.currentList.family_id = groupId;
             }
 
@@ -1709,6 +1774,11 @@ async function acceptInvite() {
 
         state.familyGroupId = groupId;
         elements.inviteModal.classList.add('hidden');
+
+        // Retroactively tag all of this user's existing lists with family_id
+        // so they appear in the shared family archive
+        await migrateUserListsToFamily(groupId);
+
         showToast('Welcome to the family group!', 'success');
         await loadFamilyMembers();
         await loadFromDatabase();
@@ -1716,6 +1786,22 @@ async function acceptInvite() {
     } catch (error) {
         console.error('Error accepting invite:', error);
         showToast('Failed to accept invitation', 'error');
+    }
+}
+
+// Tag all of a user's untagged lists with the family group ID
+// so they show up in the shared archive for all family members
+async function migrateUserListsToFamily(groupId) {
+    if (!window.supabase || !state.currentUser || !groupId) return;
+
+    try {
+        await window.supabase
+            .from('grocery_lists')
+            .update({ family_id: groupId })
+            .eq('user_id', state.currentUser.id)
+            .is('family_id', null);
+    } catch (error) {
+        console.error('Error migrating lists to family:', error);
     }
 }
 
