@@ -278,16 +278,28 @@ async function archiveAndStartNewList(
   const existingCount = todaysLists?.length || 0;
   const listName = generateListName(existingCount);
 
+  // Check if user is in a family group to set family_id on new list
+  const { data: membership } = await supabase
+    .from("family_members")
+    .select("family_group_id")
+    .eq("user_id", userId)
+    .eq("status", "accepted")
+    .limit(1)
+    .single();
+
+  const listInsertData: Record<string, unknown> = {
+    user_id: userId,
+    name: listName,
+    is_archived: false,
+  };
+  if (membership) {
+    listInsertData.family_id = membership.family_group_id;
+  }
+
   // Create new list
   const { data: newList, error: createError } = await supabase
     .from("grocery_lists")
-    .insert([
-      {
-        user_id: userId,
-        name: listName,
-        is_archived: false,
-      },
-    ])
+    .insert([listInsertData])
     .select()
     .single();
 
@@ -318,7 +330,7 @@ async function archiveAndStartNewList(
       quantity: item.quantity || null,
       is_checked: false,
       added_by: userId,
-      notes: "auto-added common item",
+      notes: "",
     }));
 
     const { data: inserted, error: insertError } = await supabase
