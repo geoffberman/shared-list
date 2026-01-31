@@ -656,6 +656,37 @@ async function loadFromDatabase() {
                         .eq('id', personal.id);
                 }
             }
+
+            // Fallback: if still no list found, look for any family member's
+            // active list (even if not yet tagged with family_id). This handles
+            // the case where another member's list hasn't been migrated yet.
+            if (!foundList) {
+                const memberIds = state.familyMembers
+                    .filter(m => m.status === 'accepted' && m.user_id)
+                    .map(m => m.user_id);
+
+                if (memberIds.length > 0) {
+                    const { data: memberLists } = await window.supabase
+                        .from('grocery_lists')
+                        .select('*')
+                        .in('user_id', memberIds)
+                        .eq('is_archived', false)
+                        .order('created_at', { ascending: false })
+                        .limit(1);
+
+                    if (memberLists && memberLists.length > 0) {
+                        foundList = memberLists[0];
+                        // Tag it with family_id so future lookups find it directly
+                        if (!foundList.family_id) {
+                            await window.supabase
+                                .from('grocery_lists')
+                                .update({ family_id: state.familyGroupId })
+                                .eq('id', foundList.id);
+                            foundList.family_id = state.familyGroupId;
+                        }
+                    }
+                }
+            }
         } else {
             // SOLO MODE: Just get the user's own active list
             const { data: lists, error: listsError } = await window.supabase
@@ -1683,7 +1714,16 @@ async function sendFamilyInvite() {
             // Tag ALL of this user's lists (active + archived) with family_id
             // so the entire history is shared with family members
             await migrateUserListsToFamily(groupId);
+
+            // Also ensure the current active list is tagged in the database
+            // (migrateUserListsToFamily handles this, but update local state too)
             if (state.currentList) {
+                if (state.currentList.id) {
+                    await window.supabase
+                        .from('grocery_lists')
+                        .update({ family_id: groupId })
+                        .eq('id', state.currentList.id);
+                }
                 state.currentList.family_id = groupId;
             }
 
@@ -1787,10 +1827,9 @@ async function acceptInvite() {
     }
 }
 
-// Tag a user's untagged ARCHIVED lists with the family group ID
-// so they show up in the shared archive for all family members.
-// Active lists are NOT tagged here — loadFromDatabase handles that
-// to avoid creating multiple active family lists.
+// Tag ALL of a user's untagged lists (active + archived) with the family group ID
+// so they are visible to all family members. This is idempotent — lists already
+// tagged with family_id are skipped (family_id IS NULL filter).
 async function migrateUserListsToFamily(groupId) {
     if (!window.supabase || !state.currentUser || !groupId) return;
 
@@ -1799,7 +1838,6 @@ async function migrateUserListsToFamily(groupId) {
             .from('grocery_lists')
             .update({ family_id: groupId })
             .eq('user_id', state.currentUser.id)
-            .eq('is_archived', true)
             .is('family_id', null);
     } catch (error) {
         console.error('Error migrating lists to family:', error);
