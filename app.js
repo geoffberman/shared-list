@@ -1441,7 +1441,10 @@ async function addItemToDatabase(item) {
             .update({ updated_at: new Date().toISOString() })
             .eq('id', state.currentList.id);
 
-        state.items.push(data);
+        // Only push if the realtime handler hasn't already added it
+        if (!state.items.find(i => i.id === data.id)) {
+            state.items.push(data);
+        }
         renderItems();
         saveToLocalStorage();
 
