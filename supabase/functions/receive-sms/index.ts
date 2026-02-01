@@ -115,18 +115,23 @@ interface ParsedItem {
 }
 
 function parseItems(body: string): ParsedItem[] {
-  // Split on commas, newlines, or "and" — but NOT when inside parentheses.
-  // We walk the string tracking paren depth so that e.g.
-  // "chips (sour cream and onion), milk" keeps the parenthesised text intact.
+  // Normalize Unicode parenthesis variants that some phone keyboards produce
+  const normalized = body
+    .replace(/[\uFF08\uFE59]/g, "(")   // fullwidth / small left paren → (
+    .replace(/[\uFF09\uFE5A]/g, ")");  // fullwidth / small right paren → )
+
+  // Split on commas, newlines, or "and" — but NOT when inside parentheses
+  // or square brackets. We walk the string tracking depth so that e.g.
+  // "chips (sour cream and onion), milk" keeps the grouped text intact.
   const raw: string[] = [];
   let current = "";
   let depth = 0;
-  for (let i = 0; i < body.length; i++) {
-    const ch = body[i];
-    if (ch === "(") {
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized[i];
+    if (ch === "(" || ch === "[") {
       depth++;
       current += ch;
-    } else if (ch === ")" && depth > 0) {
+    } else if ((ch === ")" || ch === "]") && depth > 0) {
       depth--;
       current += ch;
     } else if (depth === 0 && (ch === "," || ch === "\n")) {
@@ -134,11 +139,11 @@ function parseItems(body: string): ParsedItem[] {
       current = "";
     } else if (
       depth === 0 &&
-      body.slice(i, i + 3).toLowerCase() === "and" &&
-      (i === 0 || !/\w/.test(body[i - 1])) &&
-      (i + 3 >= body.length || !/\w/.test(body[i + 3]))
+      normalized.slice(i, i + 3).toLowerCase() === "and" &&
+      (i === 0 || !/\w/.test(normalized[i - 1])) &&
+      (i + 3 >= normalized.length || !/\w/.test(normalized[i + 3]))
     ) {
-      // "and" at a word boundary outside parens — split here
+      // "and" at a word boundary outside parens/brackets — split here
       raw.push(current);
       current = "";
       i += 2; // skip past "and" (loop increments once more)
@@ -153,7 +158,7 @@ function parseItems(body: string): ParsedItem[] {
     .filter((s) => s.length > 0 && s.length < 100);
 
   return items.map((s) => {
-    const match = s.match(/^(.+?)\s*\((.+?)\)\s*$/);
+    const match = s.match(/^(.+?)\s*[(\[](.+?)[)\]]\s*$/);
     if (match) {
       return { name: match[1].trim(), notes: match[2].trim() };
     }
