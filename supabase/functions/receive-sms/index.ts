@@ -115,14 +115,13 @@ interface ParsedItem {
 }
 
 function parseItems(body: string): ParsedItem[] {
-  // Normalize ALL Unicode bracket-like characters (parentheses, square
-  // brackets, curly braces, CJK brackets, ornamental variants, etc.) to
-  // plain ASCII ( and ).  Phone keyboards can produce fullwidth, small-form,
-  // or ornamental variants that the depth tracker wouldn't recognise,
-  // letting "," inside them trigger false splits.
+  // Normalize common Unicode bracket-like characters to plain ASCII ( and ).
+  // Phone keyboards can produce fullwidth, small-form, or ornamental
+  // variants that the depth tracker wouldn't recognise, letting ","
+  // inside them trigger false splits.
   const normalized = body
-    .replace(/\p{Ps}/gu, "(")   // any opening punctuation → (
-    .replace(/\p{Pe}/gu, ")");  // any closing punctuation → )
+    .replace(/[\uFF08\uFE59\u207D\u208D\u2768\u276A\u2772\u3008\u300A\u300C\u300E\u3010\u3014\u3016\u3018\u301A\uFE35\uFE37\uFE39\uFE3B\uFE3D\uFE3F\uFE41\uFE43\uFE47\[\{]/gu, "(")
+    .replace(/[\uFF09\uFE5A\u207E\u208E\u2769\u276B\u2773\u3009\u300B\u300D\u300F\u3011\u3015\u3017\u3019\u301B\uFE36\uFE38\uFE3A\uFE3C\uFE3E\uFE40\uFE42\uFE44\uFE48\]\}]/gu, ")");
 
   // Split on commas or newlines — but NOT when inside parentheses.
   // We walk the string tracking depth so that e.g.
