@@ -119,7 +119,7 @@ function parseItems(body: string): ParsedItem[] {
   // brackets, curly braces, CJK brackets, ornamental variants, etc.) to
   // plain ASCII ( and ).  Phone keyboards can produce fullwidth, small-form,
   // or ornamental variants that the depth tracker wouldn't recognise,
-  // letting "and" or "," inside them trigger false splits.
+  // letting "," inside them trigger false splits.
   const normalized = body
     .replace(/\p{Ps}/gu, "(")   // any opening punctuation → (
     .replace(/\p{Pe}/gu, ")");  // any closing punctuation → )
