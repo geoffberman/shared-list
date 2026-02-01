@@ -115,13 +115,44 @@ interface ParsedItem {
 }
 
 function parseItems(body: string): ParsedItem[] {
-  // Split on commas, newlines, or "and"
-  const raw = body
-    .split(/[,\n]+|\band\b/i)
+  // Split on commas, newlines, or "and" — but NOT when inside parentheses.
+  // We walk the string tracking paren depth so that e.g.
+  // "chips (sour cream and onion), milk" keeps the parenthesised text intact.
+  const raw: string[] = [];
+  let current = "";
+  let depth = 0;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (ch === "(") {
+      depth++;
+      current += ch;
+    } else if (ch === ")" && depth > 0) {
+      depth--;
+      current += ch;
+    } else if (depth === 0 && (ch === "," || ch === "\n")) {
+      raw.push(current);
+      current = "";
+    } else if (
+      depth === 0 &&
+      body.slice(i, i + 3).toLowerCase() === "and" &&
+      (i === 0 || !/\w/.test(body[i - 1])) &&
+      (i + 3 >= body.length || !/\w/.test(body[i + 3]))
+    ) {
+      // "and" at a word boundary outside parens — split here
+      raw.push(current);
+      current = "";
+      i += 2; // skip past "and" (loop increments once more)
+    } else {
+      current += ch;
+    }
+  }
+  raw.push(current);
+
+  const items = raw
     .map((s) => s.trim())
     .filter((s) => s.length > 0 && s.length < 100);
 
-  return raw.map((s) => {
+  return items.map((s) => {
     const match = s.match(/^(.+?)\s*\((.+?)\)\s*$/);
     if (match) {
       return { name: match[1].trim(), notes: match[2].trim() };
