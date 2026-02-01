@@ -115,23 +115,27 @@ interface ParsedItem {
 }
 
 function parseItems(body: string): ParsedItem[] {
-  // Normalize Unicode parenthesis variants that some phone keyboards produce
+  // Normalize ALL Unicode bracket-like characters (parentheses, square
+  // brackets, curly braces, CJK brackets, ornamental variants, etc.) to
+  // plain ASCII ( and ).  Phone keyboards can produce fullwidth, small-form,
+  // or ornamental variants that the depth tracker wouldn't recognise,
+  // letting "and" or "," inside them trigger false splits.
   const normalized = body
-    .replace(/[\uFF08\uFE59]/g, "(")   // fullwidth / small left paren → (
-    .replace(/[\uFF09\uFE5A]/g, ")");  // fullwidth / small right paren → )
+    .replace(/\p{Ps}/gu, "(")   // any opening punctuation → (
+    .replace(/\p{Pe}/gu, ")");  // any closing punctuation → )
 
-  // Split on commas, newlines, or "and" — but NOT when inside parentheses
-  // or square brackets. We walk the string tracking depth so that e.g.
+  // Split on commas, newlines, or "and" — but NOT when inside parentheses.
+  // We walk the string tracking depth so that e.g.
   // "chips (sour cream and onion), milk" keeps the grouped text intact.
   const raw: string[] = [];
   let current = "";
   let depth = 0;
   for (let i = 0; i < normalized.length; i++) {
     const ch = normalized[i];
-    if (ch === "(" || ch === "[") {
+    if (ch === "(") {
       depth++;
       current += ch;
-    } else if ((ch === ")" || ch === "]") && depth > 0) {
+    } else if (ch === ")" && depth > 0) {
       depth--;
       current += ch;
     } else if (depth === 0 && (ch === "," || ch === "\n")) {
@@ -143,7 +147,7 @@ function parseItems(body: string): ParsedItem[] {
       (i === 0 || !/\w/.test(normalized[i - 1])) &&
       (i + 3 >= normalized.length || !/\w/.test(normalized[i + 3]))
     ) {
-      // "and" at a word boundary outside parens/brackets — split here
+      // "and" at a word boundary outside parens — split here
       raw.push(current);
       current = "";
       i += 2; // skip past "and" (loop increments once more)
@@ -158,7 +162,7 @@ function parseItems(body: string): ParsedItem[] {
     .filter((s) => s.length > 0 && s.length < 100);
 
   return items.map((s) => {
-    const match = s.match(/^(.+?)\s*[(\[](.+?)[)\]]\s*$/);
+    const match = s.match(/^(.+?)\s*\((.+?)\)\s*$/);
     if (match) {
       return { name: match[1].trim(), notes: match[2].trim() };
     }
