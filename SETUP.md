@@ -142,7 +142,7 @@ Each user/family member should:
 - Twilio forwards the SMS to the Supabase Edge Function
 - The function looks up the sender's phone number in `user_phones`
 - Finds their active grocery list (or their family group's list)
-- Parses the items (comma-separated or one per line)
+- Parses the items (comma-separated, or one per line)
 - Auto-categorizes each item and inserts into the list
 - Sends a reply SMS confirming what was added
 
@@ -158,7 +158,7 @@ rice
 canned beans
 ```
 ```
-steak and potatoes and salad
+steak, potatoes, salad
 ```
 
 ---
