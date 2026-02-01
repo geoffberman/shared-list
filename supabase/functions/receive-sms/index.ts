@@ -124,7 +124,7 @@ function parseItems(body: string): ParsedItem[] {
     .replace(/\p{Ps}/gu, "(")   // any opening punctuation → (
     .replace(/\p{Pe}/gu, ")");  // any closing punctuation → )
 
-  // Split on commas, newlines, or "and" — but NOT when inside parentheses.
+  // Split on commas or newlines — but NOT when inside parentheses.
   // We walk the string tracking depth so that e.g.
   // "chips (sour cream and onion), milk" keeps the grouped text intact.
   const raw: string[] = [];
@@ -141,16 +141,6 @@ function parseItems(body: string): ParsedItem[] {
     } else if (depth === 0 && (ch === "," || ch === "\n")) {
       raw.push(current);
       current = "";
-    } else if (
-      depth === 0 &&
-      normalized.slice(i, i + 3).toLowerCase() === "and" &&
-      (i === 0 || !/\w/.test(normalized[i - 1])) &&
-      (i + 3 >= normalized.length || !/\w/.test(normalized[i + 3]))
-    ) {
-      // "and" at a word boundary outside parens — split here
-      raw.push(current);
-      current = "";
-      i += 2; // skip past "and" (loop increments once more)
     } else {
       current += ch;
     }
