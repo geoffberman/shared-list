@@ -24,6 +24,129 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+// ============================================================================
+// SKYLIGHT SYNC (optional - syncs items to Skylight Calendar grocery list)
+// ============================================================================
+
+const SKYLIGHT_BASE_URL = "https://app.ourskylight.com";
+
+interface SkylightAuth {
+  userId: string;
+  token: string;
+}
+
+let cachedSkylightAuth: SkylightAuth | null = null;
+
+async function skylightLogin(email: string, password: string): Promise<SkylightAuth> {
+  if (cachedSkylightAuth) return cachedSkylightAuth;
+
+  const response = await fetch(`${SKYLIGHT_BASE_URL}/api/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Skylight login failed: HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  cachedSkylightAuth = {
+    userId: data.data.id,
+    token: data.data.attributes.token,
+  };
+  return cachedSkylightAuth;
+}
+
+async function skylightRequest<T>(
+  endpoint: string,
+  auth: SkylightAuth,
+  frameId: string,
+  options: { method?: string; body?: unknown } = {}
+): Promise<T> {
+  const { method = "GET", body } = options;
+  const url = `${SKYLIGHT_BASE_URL}${endpoint.replace("{frameId}", frameId)}`;
+  const credentials = btoa(`${auth.userId}:${auth.token}`);
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      Accept: "application/json",
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Skylight API error: HTTP ${response.status}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+async function findSkylightGroceryList(auth: SkylightAuth, frameId: string): Promise<string | null> {
+  const listsResponse = await skylightRequest<{ data: Array<{
+    id: string;
+    attributes: { kind: string; default_grocery_list?: boolean };
+  }> }>("/api/frames/{frameId}/lists", auth, frameId);
+
+  const defaultList = listsResponse.data.find(
+    (list) => list.attributes.kind === "shopping" && list.attributes.default_grocery_list
+  );
+  if (defaultList) return defaultList.id;
+
+  const shoppingList = listsResponse.data.find((list) => list.attributes.kind === "shopping");
+  return shoppingList?.id || null;
+}
+
+/**
+ * Sync items to Skylight Calendar grocery list (best effort, fails silently)
+ */
+async function syncToSkylight(itemNames: string[]): Promise<void> {
+  const email = Deno.env.get("SKYLIGHT_EMAIL");
+  const password = Deno.env.get("SKYLIGHT_PASSWORD");
+  const frameId = Deno.env.get("SKYLIGHT_FRAME_ID");
+
+  // Skip if Skylight not configured
+  if (!email || !password || !frameId) {
+    return;
+  }
+
+  try {
+    const auth = await skylightLogin(email, password);
+    const listId = await findSkylightGroceryList(auth, frameId);
+
+    if (!listId) {
+      console.log("Skylight: No grocery list found");
+      return;
+    }
+
+    for (const name of itemNames) {
+      await skylightRequest(
+        `/api/frames/{frameId}/lists/${listId}/list_items`,
+        auth,
+        frameId,
+        {
+          method: "POST",
+          body: {
+            data: {
+              type: "list_item",
+              attributes: { label: name, section: null },
+            },
+          },
+        }
+      );
+    }
+
+    console.log(`Skylight: Synced ${itemNames.length} items`);
+  } catch (error) {
+    // Fail silently - don't break SMS flow if Skylight sync fails
+    console.error("Skylight sync failed:", error instanceof Error ? error.message : error);
+  }
+}
+
+// ============================================================================
+
 // Auto-categorize function (mirrors client-side logic)
 function autoCategorize(itemName: string): string {
   const name = itemName.toLowerCase();
@@ -576,6 +699,9 @@ Deno.serve(async (req: Request) => {
                 .from("grocery_lists")
                 .update({ updated_at: new Date().toISOString() })
                 .eq("id", newListId);
+
+              // Sync extra items to Skylight Calendar (if configured)
+              await syncToSkylight(nonDupExtras.map((item) => item.name));
             }
           }
         }
@@ -691,6 +817,9 @@ Deno.serve(async (req: Request) => {
         items_added: newItemNames,
       },
     ]);
+
+    // Sync to Skylight Calendar (if configured, fails silently)
+    await syncToSkylight(newItemNames);
 
     const count = insertedItems?.length || newItems.length;
     const itemList = newItemNames.join(", ");
