@@ -1448,12 +1448,41 @@ async function addItemToDatabase(item) {
         renderItems();
         saveToLocalStorage();
 
+        // Sync to Skylight Calendar (non-blocking, fails silently)
+        syncToSkylight([data.name]);
+
     } catch (error) {
         console.error('Error adding item to database:', error);
         item.id = Date.now() + Math.random();
         state.items.push(item);
         saveToLocalStorage();
         renderItems();
+    }
+}
+
+/**
+ * Sync items to Skylight Calendar grocery list (best effort, fails silently)
+ */
+async function syncToSkylight(items) {
+    if (!items || items.length === 0) return;
+
+    try {
+        const response = await fetch(
+            'https://hcuukgdkrexbmdvulszu.supabase.co/functions/v1/sync-skylight',
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ items: items.map(i => typeof i === 'string' ? i : i.name) })
+            }
+        );
+
+        if (response.ok) {
+            const result = await response.json();
+            console.log('Skylight sync:', result.message);
+        }
+    } catch (error) {
+        // Fail silently - Skylight sync is optional
+        console.error('Skylight sync failed:', error);
     }
 }
 
