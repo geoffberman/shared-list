@@ -1564,12 +1564,14 @@ async function syncFromSkylight() {
                 const d = result.debug || {};
                 const skyItems = d.incompleteItems || [];
                 const appItems = d.existingUncheckedNames || [];
-                const auth = d.authMethod || 'unknown';
+                const ver = d.version || 'unknown';
                 let detail;
                 if (skyItems.length > 0) {
-                    detail = `Skylight (${auth}): ${skyItems.join(', ')} | App: ${appItems.join(', ')}`;
+                    const skyPreview = skyItems.slice(0, 5).join(', ') + (skyItems.length > 5 ? ` (+${skyItems.length - 5} more)` : '');
+                    const appPreview = appItems.slice(0, 5).join(', ') + (appItems.length > 5 ? ` (+${appItems.length - 5} more)` : '');
+                    detail = `Skylight has: ${skyPreview} | App has: ${appPreview}`;
                 } else {
-                    detail = `Skylight returned ${d.skylightTotalItems ?? '?'} items (auth: ${auth})`;
+                    detail = `Skylight returned ${d.skylightTotalItems ?? '?'} items but 0 passed filter (statuses: ${(d.uniqueStatuses || []).join(', ') || '?'}) [${ver}]`;
                 }
                 statusEl.textContent = `No new items. ${detail}`;
                 statusEl.className = 'sync-status success';

@@ -1,7 +1,7 @@
 // Supabase Edge Function: sync-from-skylight
 // Pulls items from Skylight Calendar grocery list and adds them to the web app
 // Can be called manually via button or by scheduled cron job
-const FUNCTION_VERSION = "v2-token-fallback";
+const FUNCTION_VERSION = "v3-no-status-filter";
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -225,7 +225,7 @@ Deno.serve(async (req: Request) => {
       (existingItems || []).map((i) => i.name.toLowerCase().trim())
     );
     debug.existingItemCount = (existingItems || []).length;
-    debug.existingItemNames = (existingItems || []).map(i => i.name);
+    debug.existingUncheckedNames = (existingItems || []).map(i => i.name);
 
     // Filter out items that already exist in our list
     const newItems = incompleteItems.filter(
