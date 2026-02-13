@@ -1400,8 +1400,9 @@ async function addItem() {
         created_at: new Date().toISOString()
     };
 
+    let addedToDb = false;
     if (window.supabase && state.currentUser && state.currentList?.id) {
-        await addItemToDatabase(newItem);
+        addedToDb = await addItemToDatabase(newItem);
     } else {
         newItem.id = Date.now() + Math.random();
         state.items.push(newItem);
@@ -1417,6 +1418,11 @@ async function addItem() {
     elements.itemInput.focus();
 
     showToast(`Added "${name}"`, 'success');
+
+    // Sync to Skylight (called here, outside addItemToDatabase's try/catch)
+    if (addedToDb) {
+        syncToSkylight([name]);
+    }
 }
 
 async function addItemToDatabase(item) {
@@ -1430,7 +1436,7 @@ async function addItemToDatabase(item) {
 
         if (existing && existing.length > 0) {
             showDuplicateWarning(item.name);
-            return;
+            return false;
         }
 
         const { data, error } = await window.supabase
@@ -1463,8 +1469,7 @@ async function addItemToDatabase(item) {
         renderItems();
         saveToLocalStorage();
 
-        // Sync to Skylight Calendar (non-blocking, fails silently)
-        syncToSkylight([data.name]);
+        return true;
 
     } catch (error) {
         console.error('Error adding item to database:', error);
@@ -1472,6 +1477,7 @@ async function addItemToDatabase(item) {
         state.items.push(item);
         saveToLocalStorage();
         renderItems();
+        return false;
     }
 }
 
