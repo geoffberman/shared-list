@@ -1543,17 +1543,23 @@ async function syncFromSkylight() {
                 // Refresh the list to show changes
                 await loadFromDatabase();
             } else {
-                const debugInfo = result.debug || {};
-                const skylightNames = debugInfo.skylightItemNames || [];
-                const detail = skylightNames.length > 0
-                    ? `Skylight has: ${skylightNames.join(', ')}`
-                    : `Skylight returned ${result.skylightTotal || 0} items`;
-                statusEl.textContent = `✅ No new items. ${detail}`;
+                const d = result.debug || {};
+                const skyItems = d.incompleteItems || [];
+                const appItems = d.existingUncheckedNames || [];
+                const auth = d.authMethod || 'unknown';
+                let detail;
+                if (skyItems.length > 0) {
+                    detail = `Skylight (${auth}): ${skyItems.join(', ')} | App: ${appItems.join(', ')}`;
+                } else {
+                    detail = `Skylight returned ${d.skylightTotalItems ?? '?'} items (auth: ${auth})`;
+                }
+                statusEl.textContent = `No new items. ${detail}`;
                 statusEl.className = 'sync-status success';
-                showToast('Already in sync with Skylight', 'info');
             }
         } else {
-            statusEl.textContent = `❌ ${result.error || 'Sync failed'}`;
+            const d = result.debug || {};
+            const errDetail = result.details || '';
+            statusEl.textContent = `❌ ${result.error || 'Sync failed'}${errDetail ? ': ' + errDetail : ''} (auth: ${d.authMethod || 'n/a'})`;
             statusEl.className = 'sync-status error';
             showToast(result.error || 'Failed to sync from Skylight', 'error');
         }
