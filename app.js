@@ -1421,6 +1421,18 @@ async function addItem() {
 
 async function addItemToDatabase(item) {
     try {
+        // Double-check for duplicates in DB (catches items from other family members)
+        const { data: existing } = await window.supabase
+            .from('grocery_items')
+            .select('name')
+            .eq('list_id', state.currentList.id)
+            .ilike('name', item.name);
+
+        if (existing && existing.length > 0) {
+            showDuplicateWarning(item.name);
+            return;
+        }
+
         const { data, error } = await window.supabase
             .from('grocery_items')
             .insert([{
