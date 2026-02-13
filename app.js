@@ -1543,7 +1543,12 @@ async function syncFromSkylight() {
                 // Refresh the list to show changes
                 await loadFromDatabase();
             } else {
-                statusEl.textContent = '✅ Already in sync - no changes';
+                const debugInfo = result.debug || {};
+                const skylightNames = debugInfo.skylightItemNames || [];
+                const detail = skylightNames.length > 0
+                    ? `Skylight has: ${skylightNames.join(', ')}`
+                    : `Skylight returned ${result.skylightTotal || 0} items`;
+                statusEl.textContent = `✅ No new items. ${detail}`;
                 statusEl.className = 'sync-status success';
                 showToast('Already in sync with Skylight', 'info');
             }
