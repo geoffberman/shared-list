@@ -1491,12 +1491,12 @@ async function syncToSkylight(items) {
             }
         );
 
-        if (response.ok) {
-            const result = await response.json();
-            console.log('Skylight sync:', result.message);
+        const result = await response.json();
+        console.log('Skylight sync response:', response.status, JSON.stringify(result));
+        if (!response.ok) {
+            console.error('Skylight sync error:', result.error, result.details);
         }
     } catch (error) {
-        // Fail silently - Skylight sync is optional
         console.error('Skylight sync failed:', error);
     }
 }
@@ -1664,12 +1664,12 @@ async function deleteFromSkylight(itemName) {
             }
         );
 
-        if (response.ok) {
-            const result = await response.json();
-            console.log('Skylight delete sync:', result.message);
+        const result = await response.json();
+        console.log('Skylight delete response:', response.status, JSON.stringify(result));
+        if (!response.ok) {
+            console.error('Skylight delete error:', result.error, result.details);
         }
     } catch (error) {
-        // Fail silently - Skylight sync is optional
         console.error('Skylight delete sync failed:', error);
     }
 }
