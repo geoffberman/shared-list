@@ -142,11 +142,23 @@ Deno.serve(async (req: Request) => {
     debug.groceryListLabel = groceryList.attributes?.label;
 
     // Fetch items from Skylight grocery list
+    // Try with ?status=incomplete first to get only active items
     console.log(`Fetching items from Skylight list: ${groceryList.id}`);
-    const itemsRes = await fetch(
-      `${SKYLIGHT_BASE_URL}/api/frames/${frameId}/lists/${groceryList.id}/list_items`,
+    let itemsRes = await fetch(
+      `${SKYLIGHT_BASE_URL}/api/frames/${frameId}/lists/${groceryList.id}/list_items?status=incomplete`,
       { headers: auth.headers }
     );
+    // If status filter param isn't supported, fall back to unfiltered
+    if (!itemsRes.ok) {
+      console.log(`Filtered request failed (${itemsRes.status}), trying unfiltered...`);
+      debug.filteredRequestFailed = true;
+      itemsRes = await fetch(
+        `${SKYLIGHT_BASE_URL}/api/frames/${frameId}/lists/${groceryList.id}/list_items`,
+        { headers: auth.headers }
+      );
+    } else {
+      debug.filteredRequestWorked = true;
+    }
     if (!itemsRes.ok) {
       const itemsBody = await itemsRes.text();
       throw new Error(`Failed to fetch Skylight items: HTTP ${itemsRes.status} - ${itemsBody}`);
@@ -156,10 +168,15 @@ Deno.serve(async (req: Request) => {
     // Handle both possible response shapes
     const itemsArray: SkylightListItem[] = Array.isArray(itemsJson) ? itemsJson : (itemsJson.data || []);
     debug.skylightTotalItems = itemsArray.length;
+    // Capture ALL raw attributes so we can find the right filter field
     debug.skylightAllItems = itemsArray.map(i => ({
-      label: i.attributes?.label,
-      status: i.attributes?.status,
+      id: i.id,
+      ...i.attributes,
     }));
+    // Also dump first item's full raw JSON to see all fields
+    if (itemsArray.length > 0) {
+      debug.sampleRawItem = itemsArray[0];
+    }
 
     // Log unique statuses so we can understand Skylight's data model
     const uniqueStatuses = [...new Set(itemsArray.map(i => i.attributes?.status))];
