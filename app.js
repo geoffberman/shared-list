@@ -1468,7 +1468,7 @@ async function syncToSkylight(items) {
 
     try {
         const response = await fetch(
-            'https://hcuukgdkrexbmdvulszu.supabase.co/functions/v1/sync-skylight',
+            'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight',
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
