@@ -133,6 +133,11 @@ CREATE INDEX IF NOT EXISTS idx_grocery_lists_user_id ON grocery_lists(user_id);
 CREATE INDEX IF NOT EXISTS idx_grocery_lists_archived ON grocery_lists(is_archived);
 CREATE INDEX IF NOT EXISTS idx_grocery_items_list_id ON grocery_items(list_id);
 CREATE INDEX IF NOT EXISTS idx_grocery_items_checked ON grocery_items(is_checked);
+
+-- Prevent duplicate items (by name) within the same list
+-- Uses lower(name) for case-insensitive matching
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_item_name_per_list
+  ON grocery_items(list_id, lower(name));
 CREATE INDEX IF NOT EXISTS idx_frequent_items_user_id ON frequent_items(user_id);
 CREATE INDEX IF NOT EXISTS idx_frequent_items_frequency ON frequent_items(frequency_count DESC);
 CREATE INDEX IF NOT EXISTS idx_family_groups_created_by ON family_groups(created_by);

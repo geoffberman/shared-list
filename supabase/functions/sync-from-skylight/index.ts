@@ -196,9 +196,10 @@ Deno.serve(async (req: Request) => {
       status: i.attributes?.status,
     }));
 
-    // Get incomplete (unchecked) items from Skylight
+    // Only include items explicitly marked "incomplete" in Skylight
+    // (excludes "complete", null, undefined, or any other stale status)
     const incompleteItems = itemsArray.filter(
-      (item) => item.attributes?.status !== "complete"
+      (item) => item.attributes?.status === "incomplete"
     );
     debug.incompleteCount = incompleteItems.length;
     debug.incompleteItems = incompleteItems.map(i => i.attributes?.label);
@@ -246,20 +247,20 @@ Deno.serve(async (req: Request) => {
     debug.appListId = activeList.id;
     debug.appListUserId = activeList.user_id;
 
-    // Get existing UNCHECKED items in our grocery list to avoid duplicates
+    // Get ALL existing items in our grocery list to avoid duplicates
+    // Check both checked and unchecked items — never add duplicates
     const { data: existingItems } = await supabase
       .from("grocery_items")
       .select("name")
-      .eq("list_id", activeList.id)
-      .eq("is_checked", false);
+      .eq("list_id", activeList.id);
 
     const existingNames = new Set(
       (existingItems || []).map((i) => i.name.toLowerCase().trim())
     );
-    debug.existingUncheckedCount = (existingItems || []).length;
-    debug.existingUncheckedNames = (existingItems || []).map(i => i.name);
+    debug.existingItemCount = (existingItems || []).length;
+    debug.existingItemNames = (existingItems || []).map(i => i.name);
 
-    // Filter out items that already exist (unchecked) in our list
+    // Filter out items that already exist in our list
     const newItems = incompleteItems.filter(
       (item) => !existingNames.has((item.attributes?.label || "").toLowerCase().trim())
     );
@@ -306,29 +307,35 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Add new items to our grocery list
+    // Add new items to our grocery list (one at a time to skip duplicates gracefully)
     let addedNames: string[] = [];
     if (newItems.length > 0) {
-      const itemsToInsert = newItems.map((item) => ({
-        list_id: activeList.id,
-        name: item.attributes.label,
-        category: autoCategorize(item.attributes.label),
-        is_checked: false,
-        added_by: activeList.user_id,
-        notes: "From Skylight",
-      }));
+      for (const item of newItems) {
+        const { error: insertError } = await supabase
+          .from("grocery_items")
+          .insert({
+            list_id: activeList.id,
+            name: item.attributes.label,
+            category: autoCategorize(item.attributes.label),
+            is_checked: false,
+            added_by: activeList.user_id,
+            notes: "From Skylight",
+          });
 
-      const { error: insertError } = await supabase
-        .from("grocery_items")
-        .insert(itemsToInsert)
-        .select();
-
-      if (insertError) {
-        throw new Error(`Failed to insert items: ${insertError.message}`);
+        if (insertError) {
+          // Skip duplicates (unique constraint violation), log others
+          if (insertError.code === "23505") {
+            console.log(`Skipped duplicate: ${item.attributes.label}`);
+          } else {
+            console.error(`Failed to insert ${item.attributes.label}:`, insertError.message);
+          }
+        } else {
+          addedNames.push(item.attributes.label);
+        }
       }
-
-      addedNames = newItems.map((i) => i.attributes.label);
-      console.log(`Synced ${addedNames.length} items from Skylight:`, addedNames);
+      if (addedNames.length > 0) {
+        console.log(`Synced ${addedNames.length} items from Skylight:`, addedNames);
+      }
     }
 
     // Bump the list's updated_at
