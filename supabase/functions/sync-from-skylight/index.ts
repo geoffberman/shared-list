@@ -1,6 +1,7 @@
 // Supabase Edge Function: sync-from-skylight
 // Pulls items from Skylight Calendar grocery list and adds them to the web app
 // Can be called manually via button or by scheduled cron job
+const FUNCTION_VERSION = "v2-token-fallback";
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -113,7 +114,7 @@ Deno.serve(async (req: Request) => {
   }
 
   // Collect debug info throughout the process
-  const debug: Record<string, unknown> = {};
+  const debug: Record<string, unknown> = { version: FUNCTION_VERSION };
 
   try {
     const frameId = Deno.env.get("SKYLIGHT_FRAME_ID");
