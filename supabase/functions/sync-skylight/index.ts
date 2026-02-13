@@ -162,15 +162,7 @@ async function addItemToList(
     frameId,
     {
       method: "POST",
-      body: {
-        data: {
-          type: "list_item",
-          attributes: {
-            label,
-            section: null,
-          },
-        },
-      },
+      body: { label },
     }
   );
 }
