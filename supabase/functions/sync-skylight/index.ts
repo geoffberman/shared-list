@@ -1,9 +1,10 @@
 // Supabase Edge Function: sync-skylight
-// Syncs grocery items to Skylight Calendar's grocery list
-// Uses the reverse-engineered Skylight API (unofficial, may break)
-const FUNCTION_VERSION = "v4-simple-body";
-
-const SKYLIGHT_BASE_URL = "https://app.ourskylight.com";
+// Syncs grocery items to/from Skylight Calendar's grocery list.
+// Add items: POST { items: ["milk", "eggs"] }
+// Delete items: POST { deleteItems: ["milk"] }
+//
+// Uses the exact same Skylight API calling pattern as receive-sms (which works).
+const FUNCTION_VERSION = "v5-direct-fetch";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,211 +12,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
-// Skylight API types
-interface SkylightLoginResponse {
-  data: {
-    id: string;
-    type: "authenticated_user";
-    attributes: {
-      email: string;
-      token: string;
-      subscription_status: string;
-    };
-  };
-}
-
-interface SkylightList {
-  id: string;
-  type: "list";
-  attributes: {
-    label: string;
-    kind: "shopping" | "to_do";
-    default_grocery_list?: boolean;
-  };
-}
-
-interface SkylightListsResponse {
-  data: SkylightList[];
-}
-
-interface SkylightListItemResponse {
-  data: {
-    id: string;
-    type: "list_item";
-    attributes: {
-      label: string;
-      status: string;
-    };
-  };
-}
-
-interface SkylightListItemsResponse {
-  data: {
-    id: string;
-    type: "list_item";
-    attributes: {
-      label: string;
-      status: string;
-    };
-  }[];
-}
-
-// Cache auth token in memory (per function invocation)
-let cachedAuth: { userId: string; token: string } | null = null;
-
-/**
- * Get Skylight auth credentials using static SKYLIGHT_USER_ID/SKYLIGHT_TOKEN.
- */
-async function getSkylightAuth(): Promise<{ userId: string; token: string }> {
-  if (cachedAuth) return cachedAuth;
-
-  const skylightUserId = Deno.env.get("SKYLIGHT_USER_ID");
-  const skylightToken = Deno.env.get("SKYLIGHT_TOKEN");
-  if (skylightUserId && skylightToken) {
-    console.log("Using static SKYLIGHT_USER_ID/SKYLIGHT_TOKEN for sync-skylight");
-    cachedAuth = { userId: skylightUserId, token: skylightToken };
-    return cachedAuth;
-  }
-
-  throw new Error("No Skylight credentials available. Set SKYLIGHT_USER_ID and SKYLIGHT_TOKEN secrets.");
-}
-
-/**
- * Make an authenticated request to Skylight API
- */
-async function skylightRequest<T>(
-  endpoint: string,
-  auth: { userId: string; token: string },
-  frameId: string,
-  options: { method?: string; body?: unknown } = {}
-): Promise<T> {
-  const { method = "GET", body } = options;
-  const resolvedEndpoint = endpoint.replace("{frameId}", frameId);
-  const url = `${SKYLIGHT_BASE_URL}${resolvedEndpoint}`;
-
-  // Skylight uses Basic auth with userId:token
-  const credentials = btoa(`${auth.userId}:${auth.token}`);
-
-  const headers: Record<string, string> = {
-    Authorization: `Basic ${credentials}`,
-    Accept: "application/json",
-  };
-
-  if (body) {
-    headers["Content-Type"] = "application/json";
-  }
-
-  const response = await fetch(url, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Skylight API error: HTTP ${response.status} for ${method} ${resolvedEndpoint}`);
-  }
-
-  // DELETE often returns 204 No Content
-  if (response.status === 204 || response.headers.get("content-length") === "0") {
-    return {} as T;
-  }
-
-  return response.json() as Promise<T>;
-}
-
-/**
- * Find the default grocery list
- */
-async function findGroceryList(
-  auth: { userId: string; token: string },
-  frameId: string
-): Promise<SkylightList | null> {
-  const listsResponse = await skylightRequest<SkylightListsResponse>(
-    "/api/frames/{frameId}/lists",
-    auth,
-    frameId
-  );
-
-  // First try to find the default grocery list
-  const defaultList = listsResponse.data.find(
-    (list) => list.attributes.kind === "shopping" && list.attributes.default_grocery_list
-  );
-  if (defaultList) return defaultList;
-
-  // Fall back to any shopping list
-  const shoppingList = listsResponse.data.find((list) => list.attributes.kind === "shopping");
-  return shoppingList || null;
-}
-
-/**
- * Add an item to a Skylight list
- */
-async function addItemToList(
-  auth: { userId: string; token: string },
-  frameId: string,
-  listId: string,
-  label: string
-): Promise<SkylightListItemResponse> {
-  // Use simple { label } body — matches the working format in receive-sms
-  return skylightRequest<SkylightListItemResponse>(
-    `/api/frames/{frameId}/lists/${listId}/list_items`,
-    auth,
-    frameId,
-    {
-      method: "POST",
-      body: { label },
-    }
-  );
-}
-
-/**
- * Delete items from a Skylight list by name (case-insensitive match)
- */
-async function deleteItemsFromList(
-  auth: { userId: string; token: string },
-  frameId: string,
-  listId: string,
-  itemNames: string[]
-): Promise<{ deleted: string[]; notFound: string[] }> {
-  // Fetch all items from the Skylight list
-  const allItems = await skylightRequest<SkylightListItemsResponse>(
-    `/api/frames/{frameId}/lists/${listId}/list_items`,
-    auth,
-    frameId
-  );
-
-  const namesToDelete = new Set(itemNames.map(n => n.toLowerCase().trim()));
-  const deleted: string[] = [];
-  const notFound = [...itemNames];
-
-  for (const item of allItems.data) {
-    const label = item.attributes.label.toLowerCase().trim();
-    if (namesToDelete.has(label)) {
-      // Delete this item from Skylight
-      try {
-        await skylightRequest<unknown>(
-          `/api/frames/{frameId}/lists/${listId}/list_items/${item.id}`,
-          auth,
-          frameId,
-          { method: "DELETE" }
-        );
-        deleted.push(item.attributes.label);
-        // Remove from notFound
-        const idx = notFound.findIndex(n => n.toLowerCase().trim() === label);
-        if (idx >= 0) notFound.splice(idx, 1);
-        console.log(`Deleted from Skylight: ${item.attributes.label}`);
-      } catch (err) {
-        console.error(`Failed to delete ${item.attributes.label}:`, err);
-      }
-    }
-  }
-
-  return { deleted, notFound };
-}
-
-// Main handler
 Deno.serve(async (req: Request) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -225,82 +22,132 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // Check frame ID
+    const userId = Deno.env.get("SKYLIGHT_USER_ID");
+    const token = Deno.env.get("SKYLIGHT_TOKEN");
     const frameId = Deno.env.get("SKYLIGHT_FRAME_ID");
 
-    if (!frameId) {
+    console.log("sync-skylight " + FUNCTION_VERSION);
+    console.log("Config - userId:", userId ? "set" : "MISSING", "token:", token ? "set" : "MISSING", "frameId:", frameId ? "set" : "MISSING");
+
+    if (!userId || !token || !frameId) {
       return new Response(
-        JSON.stringify({
-          error: "Skylight integration not configured",
-          details: "Missing SKYLIGHT_FRAME_ID",
-        }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        JSON.stringify({ error: "Skylight not configured", details: "Missing SKYLIGHT_USER_ID, SKYLIGHT_TOKEN, or SKYLIGHT_FRAME_ID", version: FUNCTION_VERSION }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Parse request body — supports { items: [...] } for add and { deleteItems: [...] } for delete
     const body = (await req.json()) as { items?: string[]; deleteItems?: string[] };
     const { items, deleteItems } = body;
+    console.log("Request body:", JSON.stringify(body));
 
     if ((!items || items.length === 0) && (!deleteItems || deleteItems.length === 0)) {
       return new Response(
-        JSON.stringify({ error: "No items or deleteItems provided" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        JSON.stringify({ error: "No items or deleteItems provided", version: FUNCTION_VERSION }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Authenticate with Skylight (tries email/password first, falls back to static token)
-    console.log("Authenticating with Skylight...");
-    const auth = await getSkylightAuth();
+    // Build auth headers — exact same pattern as receive-sms syncToSkylight
+    const credentials = btoa(`${userId}:${token}`);
+    const headers = {
+      "Authorization": `Basic ${credentials}`,
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+    };
 
-    // Find the grocery list
-    console.log("Finding grocery list...");
-    const groceryList = await findGroceryList(auth, frameId);
+    // Find grocery list — exact same pattern as receive-sms
+    const listsRes = await fetch(`https://app.ourskylight.com/api/frames/${frameId}/lists`, { headers });
+    if (!listsRes.ok) {
+      const text = await listsRes.text();
+      console.error("Failed to fetch Skylight lists:", listsRes.status, text);
+      return new Response(
+        JSON.stringify({ error: "Failed to fetch Skylight lists", status: listsRes.status, details: text, version: FUNCTION_VERSION }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const lists = await listsRes.json();
+    const groceryList = lists.data.find((l: { attributes: { kind: string } }) => l.attributes.kind === "shopping");
 
     if (!groceryList) {
       return new Response(
-        JSON.stringify({ error: "No grocery list found in Skylight" }),
-        {
-          status: 404,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        JSON.stringify({ error: "No grocery list found in Skylight", version: FUNCTION_VERSION }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`Found grocery list: ${groceryList.attributes.label} (${groceryList.id})`);
+    console.log(`Found grocery list: ${groceryList.attributes.label} (id: ${groceryList.id})`);
 
-    // Handle adds
+    // Handle adds — exact same fetch pattern as receive-sms
     const addResults: { item: string; success: boolean; error?: string }[] = [];
     if (items && items.length > 0) {
       for (const item of items) {
         try {
-          await addItemToList(auth, frameId, groceryList.id, item);
-          addResults.push({ item, success: true });
-          console.log(`Added: ${item}`);
+          const addRes = await fetch(
+            `https://app.ourskylight.com/api/frames/${frameId}/lists/${groceryList.id}/list_items`,
+            {
+              method: "POST",
+              headers,
+              body: JSON.stringify({ label: item }),
+            }
+          );
+          if (!addRes.ok) {
+            const errText = await addRes.text();
+            console.error(`Failed to add "${item}": ${addRes.status} ${errText}`);
+            addResults.push({ item, success: false, error: `HTTP ${addRes.status}: ${errText}` });
+          } else {
+            console.log(`Added: ${item}`);
+            addResults.push({ item, success: true });
+          }
         } catch (err) {
-          const errorMessage = err instanceof Error ? err.message : "Unknown error";
-          addResults.push({ item, success: false, error: errorMessage });
-          console.error(`Failed to add ${item}: ${errorMessage}`);
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`Error adding "${item}":`, msg);
+          addResults.push({ item, success: false, error: msg });
         }
       }
     }
 
     // Handle deletes
-    let deleteResult = { deleted: [] as string[], notFound: [] as string[] };
+    const deleteResults: { deleted: string[]; notFound: string[] } = { deleted: [], notFound: [] };
     if (deleteItems && deleteItems.length > 0) {
-      deleteResult = await deleteItemsFromList(auth, frameId, groceryList.id, deleteItems);
+      // Fetch all items from the list
+      const itemsRes = await fetch(
+        `https://app.ourskylight.com/api/frames/${frameId}/lists/${groceryList.id}/list_items`,
+        { headers }
+      );
+
+      if (itemsRes.ok) {
+        const allItems = await itemsRes.json();
+        const namesToDelete = new Set(deleteItems.map((n: string) => n.toLowerCase().trim()));
+
+        for (const skyItem of allItems.data) {
+          const label = skyItem.attributes.label.toLowerCase().trim();
+          if (namesToDelete.has(label)) {
+            try {
+              const delRes = await fetch(
+                `https://app.ourskylight.com/api/frames/${frameId}/lists/${groceryList.id}/list_items/${skyItem.id}`,
+                { method: "DELETE", headers }
+              );
+              if (delRes.ok || delRes.status === 204) {
+                deleteResults.deleted.push(skyItem.attributes.label);
+                console.log(`Deleted: ${skyItem.attributes.label}`);
+              }
+            } catch (err) {
+              console.error(`Failed to delete ${skyItem.attributes.label}:`, err);
+            }
+          }
+        }
+
+        deleteResults.notFound = deleteItems.filter(
+          (n: string) => !deleteResults.deleted.some(d => d.toLowerCase().trim() === n.toLowerCase().trim())
+        );
+      }
     }
 
-    const addedCount = addResults.filter((r) => r.success).length;
+    const addedCount = addResults.filter(r => r.success).length;
     const parts: string[] = [];
     if (addedCount > 0) parts.push(`Added ${addedCount}/${items?.length ?? 0}`);
-    if (deleteResult.deleted.length > 0) parts.push(`Deleted ${deleteResult.deleted.length}`);
+    if (deleteResults.deleted.length > 0) parts.push(`Deleted ${deleteResults.deleted.length}`);
 
     return new Response(
       JSON.stringify({
@@ -309,24 +156,17 @@ Deno.serve(async (req: Request) => {
         message: `${parts.join(", ")} items in Skylight`,
         listName: groceryList.attributes.label,
         results: addResults,
-        deleted: deleteResult.deleted,
-        notFound: deleteResult.notFound,
+        deleted: deleteResults.deleted,
+        notFound: deleteResults.notFound,
       }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error("Skylight sync error:", error);
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-
+    console.error("sync-skylight error:", error);
+    const msg = error instanceof Error ? error.message : String(error);
     return new Response(
-      JSON.stringify({ error: "Failed to sync with Skylight", details: errorMessage, version: FUNCTION_VERSION }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      JSON.stringify({ error: "Failed to sync with Skylight", details: msg, version: FUNCTION_VERSION }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });

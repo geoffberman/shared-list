@@ -1482,6 +1482,9 @@ async function syncToSkylight(items) {
     if (!items || items.length === 0) return;
 
     try {
+        const itemNames = items.map(i => typeof i === 'string' ? i : i.name);
+        console.log('syncToSkylight: calling edge function with', itemNames);
+
         const response = await fetch(
             'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight',
             {
@@ -1490,7 +1493,7 @@ async function syncToSkylight(items) {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
                 },
-                body: JSON.stringify({ items: items.map(i => typeof i === 'string' ? i : i.name) })
+                body: JSON.stringify({ items: itemNames })
             }
         );
 
@@ -1498,9 +1501,13 @@ async function syncToSkylight(items) {
         console.log('Skylight sync response:', response.status, JSON.stringify(result));
         if (!response.ok) {
             console.error('Skylight sync error:', result.error, result.details);
+            showToast(`Skylight sync error: ${result.error || response.status}`, 'error');
+        } else if (result.version) {
+            console.log('Skylight function version:', result.version);
         }
     } catch (error) {
         console.error('Skylight sync failed:', error);
+        showToast('Skylight sync failed: ' + error.message, 'error');
     }
 }
 
