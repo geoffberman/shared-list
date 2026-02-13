@@ -53,14 +53,17 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // Get Skylight credentials — use email/password login (same as sync-skylight)
-    const skylightEmail = Deno.env.get("SKYLIGHT_EMAIL");
-    const skylightPassword = Deno.env.get("SKYLIGHT_PASSWORD");
+    // Get Skylight credentials (token-based auth)
+    const skylightUserId = Deno.env.get("SKYLIGHT_USER_ID");
+    const skylightToken = Deno.env.get("SKYLIGHT_TOKEN");
     const frameId = Deno.env.get("SKYLIGHT_FRAME_ID");
 
-    if (!skylightEmail || !skylightPassword || !frameId) {
+    if (!skylightUserId || !skylightToken || !frameId) {
       return new Response(
-        JSON.stringify({ error: "Skylight not configured", details: "Missing SKYLIGHT_EMAIL, SKYLIGHT_PASSWORD, or SKYLIGHT_FRAME_ID" }),
+        JSON.stringify({
+          error: "Skylight not configured",
+          details: `Missing: ${!skylightUserId ? "SKYLIGHT_USER_ID " : ""}${!skylightToken ? "SKYLIGHT_TOKEN " : ""}${!frameId ? "SKYLIGHT_FRAME_ID" : ""}`.trim()
+        }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -79,24 +82,7 @@ Deno.serve(async (req: Request) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Login to Skylight to get a fresh auth token (tokens expire)
-    const loginRes = await fetch("https://app.ourskylight.com/api/sessions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-      },
-      body: JSON.stringify({ email: skylightEmail, password: skylightPassword }),
-    });
-
-    if (!loginRes.ok) {
-      throw new Error(`Skylight login failed: HTTP ${loginRes.status}`);
-    }
-
-    const loginData = await loginRes.json();
-    const skylightUserId = loginData.data.id;
-    const skylightToken = loginData.data.attributes.token;
-
+    // Set up Skylight auth with token
     const credentials = btoa(`${skylightUserId}:${skylightToken}`);
     const skylightHeaders = {
       "Authorization": `Basic ${credentials}`,
@@ -105,39 +91,49 @@ Deno.serve(async (req: Request) => {
     };
 
     // Fetch Skylight lists to find the grocery list
+    console.log(`Fetching Skylight lists for frame: ${frameId}`);
     const listsRes = await fetch(`https://app.ourskylight.com/api/frames/${frameId}/lists`, {
       headers: skylightHeaders
     });
     if (!listsRes.ok) {
-      throw new Error(`Failed to fetch Skylight lists: ${listsRes.status}`);
+      const listsBody = await listsRes.text();
+      throw new Error(`Failed to fetch Skylight lists: HTTP ${listsRes.status} - ${listsBody}`);
     }
     const lists = await listsRes.json();
+    console.log(`Found ${lists.data?.length ?? 0} Skylight lists:`, JSON.stringify(lists.data?.map((l: { id: string; attributes: { label: string; kind: string } }) => ({ id: l.id, label: l.attributes.label, kind: l.attributes.kind }))));
     const groceryList = lists.data.find((l: { attributes: { kind: string } }) =>
       l.attributes.kind === "shopping"
     );
 
     if (!groceryList) {
       return new Response(
-        JSON.stringify({ error: "No Skylight grocery list found" }),
+        JSON.stringify({
+          error: "No Skylight grocery list found",
+          debug: { listsFound: lists.data?.length ?? 0, listKinds: lists.data?.map((l: { attributes: { kind: string; label: string } }) => `${l.attributes.label}(${l.attributes.kind})`) }
+        }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     // Fetch items from Skylight grocery list
+    console.log(`Fetching items from Skylight list: ${groceryList.id} (${groceryList.attributes?.label})`);
     const itemsRes = await fetch(
       `https://app.ourskylight.com/api/frames/${frameId}/lists/${groceryList.id}/list_items`,
       { headers: skylightHeaders }
     );
     if (!itemsRes.ok) {
-      throw new Error(`Failed to fetch Skylight items: ${itemsRes.status}`);
+      const itemsBody = await itemsRes.text();
+      throw new Error(`Failed to fetch Skylight items: HTTP ${itemsRes.status} - ${itemsBody}`);
     }
     const skylightItems: SkylightListItemsResponse = await itemsRes.json();
+    console.log(`Skylight returned ${skylightItems.data?.length ?? 0} total items`);
 
     // Get incomplete (unchecked) items from Skylight
     // Use !== "complete" instead of === "incomplete" to be robust against status value changes
     const incompleteItems = skylightItems.data.filter(
       (item) => item.attributes.status !== "complete"
     );
+    console.log(`Incomplete items: ${incompleteItems.length}`, incompleteItems.map(i => `${i.attributes.label} (${i.attributes.status})`));
 
     // Build a set of ALL Skylight item names (for delete sync)
     const allSkylightNames = new Set(
@@ -170,14 +166,15 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const { data: activeList } = await listQuery.single();
+    const { data: activeList, error: listError } = await listQuery.single();
 
     if (!activeList) {
       return new Response(
-        JSON.stringify({ error: "No active grocery list found in app" }),
+        JSON.stringify({ error: "No active grocery list found in app", details: listError?.message, targetUserId }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    console.log(`Found app list: ${activeList.id}, user: ${activeList.user_id}`);
 
     // Get existing UNCHECKED items in our grocery list to avoid duplicates
     // Only compare against unchecked items so checked-off items can be re-added
@@ -190,11 +187,13 @@ Deno.serve(async (req: Request) => {
     const existingNames = new Set(
       (existingItems || []).map((i) => i.name.toLowerCase().trim())
     );
+    console.log(`Existing unchecked items in app (${(existingItems || []).length}):`, Array.from(existingNames));
 
     // Filter out items that already exist (unchecked) in our list
     const newItems = incompleteItems.filter(
       (item) => !existingNames.has(item.attributes.label.toLowerCase().trim())
     );
+    console.log(`New items to add: ${newItems.length}`, newItems.map(i => i.attributes.label));
 
     // Delete sync: remove items that were synced from Skylight but no longer exist there
     const { data: skylightSyncedItems } = await supabase
