@@ -46,45 +46,9 @@ function autoCategorize(itemName: string): string {
 }
 
 /**
- * Get Skylight auth headers.
- * Tries email/password login first (same as sync-skylight which works),
- * falls back to static SKYLIGHT_USER_ID/SKYLIGHT_TOKEN.
+ * Get Skylight auth headers using static SKYLIGHT_USER_ID/SKYLIGHT_TOKEN.
  */
 async function getSkylightAuth(): Promise<{ headers: Record<string, string>; method: string }> {
-  const email = Deno.env.get("SKYLIGHT_EMAIL");
-  const password = Deno.env.get("SKYLIGHT_PASSWORD");
-
-  // Try email/password login first (proven working in sync-skylight)
-  if (email && password) {
-    console.log("Attempting Skylight login with email/password...");
-    try {
-      const loginRes = await fetch(`${SKYLIGHT_BASE_URL}/api/sessions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      if (loginRes.ok) {
-        const loginData = await loginRes.json();
-        const userId = loginData.data.id;
-        const token = loginData.data.attributes.token;
-        const credentials = btoa(`${userId}:${token}`);
-        console.log("Skylight email/password login succeeded");
-        return {
-          headers: {
-            "Authorization": `Basic ${credentials}`,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-          },
-          method: "email/password login",
-        };
-      }
-      console.log(`Skylight email/password login failed: HTTP ${loginRes.status}`);
-    } catch (e) {
-      console.log(`Skylight email/password login error: ${e}`);
-    }
-  }
-
-  // Fall back to static token
   const skylightUserId = Deno.env.get("SKYLIGHT_USER_ID");
   const skylightToken = Deno.env.get("SKYLIGHT_TOKEN");
   if (skylightUserId && skylightToken) {
@@ -100,7 +64,7 @@ async function getSkylightAuth(): Promise<{ headers: Record<string, string>; met
     };
   }
 
-  throw new Error("No Skylight credentials available. Need SKYLIGHT_EMAIL+SKYLIGHT_PASSWORD or SKYLIGHT_USER_ID+SKYLIGHT_TOKEN");
+  throw new Error("No Skylight credentials available. Set SKYLIGHT_USER_ID and SKYLIGHT_TOKEN secrets.");
 }
 
 Deno.serve(async (req: Request) => {
