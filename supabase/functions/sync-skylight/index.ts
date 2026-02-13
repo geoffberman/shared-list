@@ -64,44 +64,11 @@ interface SkylightListItemsResponse {
 let cachedAuth: { userId: string; token: string } | null = null;
 
 /**
- * Get Skylight auth credentials.
- * Tries email/password login first, falls back to static SKYLIGHT_USER_ID/SKYLIGHT_TOKEN.
+ * Get Skylight auth credentials using static SKYLIGHT_USER_ID/SKYLIGHT_TOKEN.
  */
 async function getSkylightAuth(): Promise<{ userId: string; token: string }> {
   if (cachedAuth) return cachedAuth;
 
-  const email = Deno.env.get("SKYLIGHT_EMAIL");
-  const password = Deno.env.get("SKYLIGHT_PASSWORD");
-
-  // Try email/password login first
-  if (email && password) {
-    console.log("Attempting Skylight login with email/password...");
-    try {
-      const response = await fetch(`${SKYLIGHT_BASE_URL}/api/sessions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (response.ok) {
-        const data = (await response.json()) as SkylightLoginResponse;
-        cachedAuth = {
-          userId: data.data.id,
-          token: data.data.attributes.token,
-        };
-        console.log("Skylight email/password login succeeded");
-        return cachedAuth;
-      }
-      console.log(`Skylight email/password login failed: HTTP ${response.status}`);
-    } catch (e) {
-      console.log(`Skylight email/password login error: ${e}`);
-    }
-  }
-
-  // Fall back to static token
   const skylightUserId = Deno.env.get("SKYLIGHT_USER_ID");
   const skylightToken = Deno.env.get("SKYLIGHT_TOKEN");
   if (skylightUserId && skylightToken) {
@@ -110,7 +77,7 @@ async function getSkylightAuth(): Promise<{ userId: string; token: string }> {
     return cachedAuth;
   }
 
-  throw new Error("No Skylight credentials available. Need SKYLIGHT_EMAIL+SKYLIGHT_PASSWORD or SKYLIGHT_USER_ID+SKYLIGHT_TOKEN");
+  throw new Error("No Skylight credentials available. Set SKYLIGHT_USER_ID and SKYLIGHT_TOKEN secrets.");
 }
 
 /**
