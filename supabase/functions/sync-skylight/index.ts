@@ -63,33 +63,53 @@ interface SkylightListItemsResponse {
 let cachedAuth: { userId: string; token: string } | null = null;
 
 /**
- * Login to Skylight and get auth credentials
+ * Get Skylight auth credentials.
+ * Tries email/password login first, falls back to static SKYLIGHT_USER_ID/SKYLIGHT_TOKEN.
  */
-async function skylightLogin(email: string, password: string): Promise<{ userId: string; token: string }> {
+async function getSkylightAuth(): Promise<{ userId: string; token: string }> {
   if (cachedAuth) return cachedAuth;
 
-  const response = await fetch(`${SKYLIGHT_BASE_URL}/api/sessions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({ email, password }),
-  });
+  const email = Deno.env.get("SKYLIGHT_EMAIL");
+  const password = Deno.env.get("SKYLIGHT_PASSWORD");
 
-  if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error("Invalid Skylight email or password");
+  // Try email/password login first
+  if (email && password) {
+    console.log("Attempting Skylight login with email/password...");
+    try {
+      const response = await fetch(`${SKYLIGHT_BASE_URL}/api/sessions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (response.ok) {
+        const data = (await response.json()) as SkylightLoginResponse;
+        cachedAuth = {
+          userId: data.data.id,
+          token: data.data.attributes.token,
+        };
+        console.log("Skylight email/password login succeeded");
+        return cachedAuth;
+      }
+      console.log(`Skylight email/password login failed: HTTP ${response.status}`);
+    } catch (e) {
+      console.log(`Skylight email/password login error: ${e}`);
     }
-    throw new Error(`Skylight login failed: HTTP ${response.status}`);
   }
 
-  const data = (await response.json()) as SkylightLoginResponse;
-  cachedAuth = {
-    userId: data.data.id,
-    token: data.data.attributes.token,
-  };
-  return cachedAuth;
+  // Fall back to static token
+  const skylightUserId = Deno.env.get("SKYLIGHT_USER_ID");
+  const skylightToken = Deno.env.get("SKYLIGHT_TOKEN");
+  if (skylightUserId && skylightToken) {
+    console.log("Using static SKYLIGHT_USER_ID/SKYLIGHT_TOKEN for sync-skylight");
+    cachedAuth = { userId: skylightUserId, token: skylightToken };
+    return cachedAuth;
+  }
+
+  throw new Error("No Skylight credentials available. Need SKYLIGHT_EMAIL+SKYLIGHT_PASSWORD or SKYLIGHT_USER_ID+SKYLIGHT_TOKEN");
 }
 
 /**
@@ -244,16 +264,14 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // Get Skylight credentials from environment
-    const email = Deno.env.get("SKYLIGHT_EMAIL");
-    const password = Deno.env.get("SKYLIGHT_PASSWORD");
+    // Check frame ID
     const frameId = Deno.env.get("SKYLIGHT_FRAME_ID");
 
-    if (!email || !password || !frameId) {
+    if (!frameId) {
       return new Response(
         JSON.stringify({
           error: "Skylight integration not configured",
-          details: "Missing SKYLIGHT_EMAIL, SKYLIGHT_PASSWORD, or SKYLIGHT_FRAME_ID",
+          details: "Missing SKYLIGHT_FRAME_ID",
         }),
         {
           status: 500,
@@ -276,9 +294,9 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Login to Skylight
-    console.log("Logging in to Skylight...");
-    const auth = await skylightLogin(email, password);
+    // Authenticate with Skylight (tries email/password first, falls back to static token)
+    console.log("Authenticating with Skylight...");
+    const auth = await getSkylightAuth();
 
     // Find the grocery list
     console.log("Finding grocery list...");

@@ -196,11 +196,13 @@ Deno.serve(async (req: Request) => {
       status: i.attributes?.status,
     }));
 
-    // Only include items explicitly marked "incomplete" in Skylight
-    // (excludes "complete", null, undefined, or any other stale status)
+    // Include all items that aren't checked off in Skylight
     const incompleteItems = itemsArray.filter(
-      (item) => item.attributes?.status === "incomplete"
+      (item) => item.attributes?.status !== "complete"
     );
+    // Log unique statuses so we can see what Skylight actually uses
+    const uniqueStatuses = [...new Set(itemsArray.map(i => i.attributes?.status))];
+    debug.uniqueStatuses = uniqueStatuses;
     debug.incompleteCount = incompleteItems.length;
     debug.incompleteItems = incompleteItems.map(i => i.attributes?.label);
 
