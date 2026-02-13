@@ -60,6 +60,8 @@ const elements = {
     viewHistoryBtn: document.getElementById('view-history-btn'),
     closeHistoryBtn: document.getElementById('close-history-btn'),
     clearFrequentBtn: document.getElementById('clear-frequent-btn'),
+    syncFromSkylightBtn: document.getElementById('sync-from-skylight-btn'),
+    skylightSyncStatus: document.getElementById('skylight-sync-status'),
 
     // Modals
     settingsModal: document.getElementById('settings-modal'),
@@ -241,6 +243,7 @@ function setupEventListeners() {
         elements.currentListSection.classList.remove('hidden');
     });
     elements.clearFrequentBtn.addEventListener('click', clearFrequentItems);
+    elements.syncFromSkylightBtn?.addEventListener('click', syncFromSkylight);
 
     // SMS phone registration
     elements.savePhoneBtn?.addEventListener('click', savePhoneNumber);
@@ -1483,6 +1486,65 @@ async function syncToSkylight(items) {
     } catch (error) {
         // Fail silently - Skylight sync is optional
         console.error('Skylight sync failed:', error);
+    }
+}
+
+/**
+ * Sync items FROM Skylight Calendar grocery list to this app
+ */
+async function syncFromSkylight() {
+    const statusEl = elements.skylightSyncStatus;
+    const btn = elements.syncFromSkylightBtn;
+
+    if (!state.currentUser) {
+        showToast('Please sign in first', 'error');
+        return;
+    }
+
+    // Show loading state
+    btn.disabled = true;
+    btn.textContent = '⏳ Syncing...';
+    statusEl.classList.remove('hidden');
+    statusEl.textContent = 'Checking Skylight for new items...';
+    statusEl.className = 'sync-status';
+
+    try {
+        const response = await fetch(
+            'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-from-skylight',
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: state.currentUser.id })
+            }
+        );
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+            if (result.added > 0) {
+                statusEl.textContent = `✅ Added ${result.added} item${result.added !== 1 ? 's' : ''}: ${result.items.join(', ')}`;
+                statusEl.className = 'sync-status success';
+                showToast(`Added ${result.added} item${result.added !== 1 ? 's' : ''} from Skylight`, 'success');
+                // Refresh the list to show new items
+                await loadItems();
+            } else {
+                statusEl.textContent = '✅ Already in sync - no new items';
+                statusEl.className = 'sync-status success';
+                showToast('Already in sync with Skylight', 'info');
+            }
+        } else {
+            statusEl.textContent = `❌ ${result.error || 'Sync failed'}`;
+            statusEl.className = 'sync-status error';
+            showToast(result.error || 'Failed to sync from Skylight', 'error');
+        }
+    } catch (error) {
+        console.error('Sync from Skylight failed:', error);
+        statusEl.textContent = '❌ Connection error';
+        statusEl.className = 'sync-status error';
+        showToast('Failed to connect to Skylight', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '📥 Sync from Skylight';
     }
 }
 

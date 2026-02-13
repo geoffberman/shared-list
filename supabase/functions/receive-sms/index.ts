@@ -33,12 +33,16 @@ const corsHeaders = {
  * Uses pre-configured token instead of login (Skylight blocks server-side login)
  */
 async function syncToSkylight(itemNames: string[]): Promise<void> {
+  console.log("Skylight sync called with items:", itemNames);
   const userId = Deno.env.get("SKYLIGHT_USER_ID");
   const token = Deno.env.get("SKYLIGHT_TOKEN");
   const frameId = Deno.env.get("SKYLIGHT_FRAME_ID");
 
+  console.log("Skylight config - userId:", userId ? "set" : "missing", "token:", token ? "set" : "missing", "frameId:", frameId ? "set" : "missing");
+
   // Skip if Skylight not configured
   if (!userId || !token || !frameId) {
+    console.log("Skylight: Skipping - not configured");
     return;
   }
 

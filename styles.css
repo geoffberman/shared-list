@@ -1162,6 +1162,24 @@ body {
     background: var(--accent-color);
 }
 
+.sync-status {
+    font-size: 0.85rem;
+    margin-top: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--border-radius);
+    background: var(--bg-color);
+}
+
+.sync-status.success {
+    color: var(--primary-color);
+    background: var(--accent-color);
+}
+
+.sync-status.error {
+    color: #c0392b;
+    background: #fdeaea;
+}
+
 .sms-instructions {
     background: var(--bg-color);
     border-radius: var(--border-radius);
