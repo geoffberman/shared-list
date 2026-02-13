@@ -78,10 +78,38 @@ Deno.serve(async (req: Request) => {
 
     console.log(`Found grocery list: ${groceryList.attributes.label} (id: ${groceryList.id})`);
 
-    // Handle adds — exact same fetch pattern as receive-sms
-    const addResults: { item: string; success: boolean; error?: string }[] = [];
+    // Handle adds — fetch existing items first to avoid duplicates
+    const addResults: { item: string; success: boolean; skipped?: boolean; error?: string }[] = [];
     if (items && items.length > 0) {
+      // Fetch existing Skylight items to deduplicate
+      let existingLabels = new Set<string>();
+      try {
+        const existingRes = await fetch(
+          `https://app.ourskylight.com/api/frames/${frameId}/lists/${groceryList.id}/list_items`,
+          { headers }
+        );
+        if (existingRes.ok) {
+          const existingJson = await existingRes.json();
+          const existingItems = Array.isArray(existingJson) ? existingJson : (existingJson.data || []);
+          existingLabels = new Set(
+            existingItems.map((i: { attributes?: { label?: string } }) =>
+              (i.attributes?.label || "").toLowerCase().trim()
+            )
+          );
+          console.log(`Found ${existingLabels.size} existing Skylight items`);
+        }
+      } catch (err) {
+        console.error("Failed to fetch existing Skylight items (will add all):", err);
+      }
+
       for (const item of items) {
+        // Skip if already in Skylight
+        if (existingLabels.has(item.toLowerCase().trim())) {
+          console.log(`Skipped (already in Skylight): ${item}`);
+          addResults.push({ item, success: true, skipped: true });
+          continue;
+        }
+
         try {
           const addRes = await fetch(
             `https://app.ourskylight.com/api/frames/${frameId}/lists/${groceryList.id}/list_items`,

@@ -1400,9 +1400,11 @@ async function addItem() {
         created_at: new Date().toISOString()
     };
 
-    let addedToDb = false;
+    // Sync to Skylight immediately (fire-and-forget, independent of DB)
+    syncToSkylight([name]);
+
     if (window.supabase && state.currentUser && state.currentList?.id) {
-        addedToDb = await addItemToDatabase(newItem);
+        await addItemToDatabase(newItem);
     } else {
         newItem.id = Date.now() + Math.random();
         state.items.push(newItem);
@@ -1418,9 +1420,6 @@ async function addItem() {
     elements.itemInput.focus();
 
     showToast(`Added "${name}"`, 'success');
-
-    // Always sync to Skylight — even if DB insert failed, the item exists locally
-    syncToSkylight([name]);
 }
 
 async function addItemToDatabase(item) {
