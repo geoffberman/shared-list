@@ -1,7 +1,7 @@
 // Supabase Edge Function: sync-skylight
 // Syncs grocery items to Skylight Calendar's grocery list
 // Uses the reverse-engineered Skylight API (unofficial, may break)
-const FUNCTION_VERSION = "v2-token-fallback";
+const FUNCTION_VERSION = "v3-jsonapi-body";
 
 const SKYLIGHT_BASE_URL = "https://app.ourskylight.com";
 
@@ -156,13 +156,19 @@ async function addItemToList(
   listId: string,
   label: string
 ): Promise<SkylightListItemResponse> {
+  // Skylight uses JSONAPI format for request bodies
   return skylightRequest<SkylightListItemResponse>(
     `/api/frames/{frameId}/lists/${listId}/list_items`,
     auth,
     frameId,
     {
       method: "POST",
-      body: { label },
+      body: {
+        data: {
+          type: "list_item",
+          attributes: { label },
+        },
+      },
     }
   );
 }
