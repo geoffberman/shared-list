@@ -1,6 +1,7 @@
 // Supabase Edge Function: sync-skylight
 // Syncs grocery items to Skylight Calendar's grocery list
 // Uses the reverse-engineered Skylight API (unofficial, may break)
+const FUNCTION_VERSION = "v2-token-fallback";
 
 const SKYLIGHT_BASE_URL = "https://app.ourskylight.com";
 
@@ -344,6 +345,7 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         success: true,
+        version: FUNCTION_VERSION,
         message: `${parts.join(", ")} items in Skylight`,
         listName: groceryList.attributes.label,
         results: addResults,
@@ -360,7 +362,7 @@ Deno.serve(async (req: Request) => {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
     return new Response(
-      JSON.stringify({ error: "Failed to sync with Skylight", details: errorMessage }),
+      JSON.stringify({ error: "Failed to sync with Skylight", details: errorMessage, version: FUNCTION_VERSION }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
