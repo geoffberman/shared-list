@@ -196,6 +196,51 @@ body {
     flex-wrap: wrap;
 }
 
+/* Skylight Sync Bar */
+.skylight-sync-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
+.btn-skylight-sync {
+    background: var(--primary-color);
+    color: white;
+    padding: 0.625rem 1.25rem;
+    border: none;
+    border-radius: var(--border-radius);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.btn-skylight-sync:hover {
+    background: var(--secondary-color);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-hover);
+}
+
+.btn-skylight-sync:active {
+    transform: translateY(0);
+}
+
+.btn-skylight-sync:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.skylight-sync-bar .sync-status {
+    flex: 1;
+    min-width: 0;
+}
+
 /* Recent Lists Bar */
 .recent-lists-bar {
     display: flex;

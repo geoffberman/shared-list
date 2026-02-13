@@ -64,6 +64,12 @@
                         </div>
                     </div>
 
+                    <!-- Skylight Sync Bar -->
+                    <div class="skylight-sync-bar">
+                        <button id="sync-from-skylight-btn" class="btn btn-skylight-sync">📥 Sync from Skylight</button>
+                        <div id="skylight-sync-status" class="sync-status hidden"></div>
+                    </div>
+
                     <!-- Recent Lists & Common Items Bar -->
                     <div class="recent-lists-bar">
                         <select id="recent-lists-dropdown" class="recent-lists-dropdown">
@@ -184,13 +190,6 @@ rice</code>
                                 <input type="checkbox" id="group-by-category">
                                 <span>Group items by category</span>
                             </label>
-                        </div>
-
-                        <div class="settings-section">
-                            <h3>Skylight Calendar Sync</h3>
-                            <p class="help-text">Sync items between your Skylight Calendar and this grocery list</p>
-                            <button id="sync-from-skylight-btn" class="btn btn-secondary">📥 Sync from Skylight</button>
-                            <div id="skylight-sync-status" class="sync-status hidden"></div>
                         </div>
 
                         <div class="settings-section">
