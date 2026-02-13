@@ -250,15 +250,16 @@ Deno.serve(async (req: Request) => {
     );
     debug.newItemsToAdd = newItems.map(i => i.attributes?.label);
 
-    // Delete sync: remove items that were synced from Skylight but no longer exist there
-    const { data: skylightSyncedItems } = await supabase
+    // Delete sync: remove unchecked items from app that no longer exist on Skylight.
+    // This handles items checked off / deleted on the Skylight device — regardless of
+    // whether the item originally came from Skylight or was added in the app.
+    const { data: allUncheckedItems } = await supabase
       .from("grocery_items")
       .select("id, name")
       .eq("list_id", activeList.id)
-      .eq("notes", "From Skylight")
       .eq("is_checked", false);
 
-    const itemsToDelete = (skylightSyncedItems || []).filter(
+    const itemsToDelete = (allUncheckedItems || []).filter(
       (item) => !allSkylightNames.has(item.name.toLowerCase().trim())
     );
 

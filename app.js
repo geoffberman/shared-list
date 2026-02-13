@@ -1518,7 +1518,10 @@ async function syncToSkylight(items) {
 }
 
 /**
- * Sync items FROM Skylight Calendar grocery list to this app
+ * Two-way sync with Skylight Calendar grocery list:
+ * 1) Push unchecked app items TO Skylight
+ * 2) Pull new Skylight items INTO app
+ * 3) Remove app items that were checked off / deleted on Skylight
  */
 async function syncFromSkylight() {
     const statusEl = elements.skylightSyncStatus;
@@ -1538,11 +1541,41 @@ async function syncFromSkylight() {
     btn.disabled = true;
     btn.textContent = '⏳ Syncing...';
     statusEl.classList.remove('hidden');
-    statusEl.textContent = 'Checking Skylight for new items...';
+    statusEl.textContent = 'Pushing items to Skylight...';
     statusEl.className = 'sync-status';
 
     try {
-        // Call the edge function — it fetches Skylight data and returns it in debug
+        // --- Step 1: Push unchecked app items TO Skylight ---
+        const uncheckedItems = state.items.filter(i => !i.is_checked);
+        const itemNames = uncheckedItems.map(i => i.name);
+        let pushedCount = 0;
+
+        if (itemNames.length > 0) {
+            try {
+                const pushResponse = await fetch(
+                    'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight',
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                        },
+                        body: JSON.stringify({ items: itemNames })
+                    }
+                );
+                const pushResult = await pushResponse.json();
+                console.log('Push to Skylight result:', JSON.stringify(pushResult));
+                if (pushResult.results) {
+                    pushedCount = pushResult.results.filter(r => r.success).length;
+                }
+            } catch (pushError) {
+                console.error('Push to Skylight failed (continuing with pull):', pushError);
+            }
+        }
+
+        // --- Step 2: Pull from Skylight (adds new items + removes checked-off items) ---
+        statusEl.textContent = 'Pulling updates from Skylight...';
+
         const response = await fetch(
             'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-from-skylight',
             {
@@ -1558,18 +1591,26 @@ async function syncFromSkylight() {
         const result = await response.json();
         console.log('Skylight sync result:', JSON.stringify(result, null, 2));
 
-        // If the edge function already added items, use that result
-        if (response.ok && result.success && (result.added > 0 || result.removed > 0)) {
+        // If the edge function already added/removed items, use that result
+        if (response.ok && result.success) {
             const parts = [];
+            if (pushedCount > 0) {
+                parts.push(`Pushed ${pushedCount} to Skylight`);
+            }
             if (result.added > 0) {
                 parts.push(`Added ${result.added}: ${result.items.join(', ')}`);
             }
             if (result.removed > 0) {
                 parts.push(`Removed ${result.removed}: ${result.removedItems.join(', ')}`);
             }
-            statusEl.textContent = `✅ ${parts.join(' | ')}`;
-            statusEl.className = 'sync-status success';
-            showToast(`Synced from Skylight`, 'success');
+            if (parts.length > 0) {
+                statusEl.textContent = `✅ ${parts.join(' | ')}`;
+                statusEl.className = 'sync-status success';
+                showToast('Synced with Skylight', 'success');
+            } else {
+                statusEl.textContent = '✅ Everything in sync with Skylight';
+                statusEl.className = 'sync-status success';
+            }
             await loadFromDatabase();
             return;
         }
@@ -1578,21 +1619,18 @@ async function syncFromSkylight() {
         const d = result.debug || {};
         const allSkylightItems = d.skylightAllItems || [];
 
-        // Log all item data to help diagnose which fields distinguish active vs checked-off
         console.log('Skylight items full data:', JSON.stringify(allSkylightItems.slice(0, 3), null, 2));
-        console.log('Unique statuses:', [...new Set(allSkylightItems.map(i => i.status))]);
-        console.log('Sample raw item:', JSON.stringify(d.sampleRawItem, null, 2));
 
         if (allSkylightItems.length === 0) {
-            statusEl.textContent = 'No items found in Skylight.';
+            const parts = [];
+            if (pushedCount > 0) parts.push(`Pushed ${pushedCount} to Skylight`);
+            parts.push('No items found in Skylight');
+            statusEl.textContent = parts.join(' | ');
             statusEl.className = 'sync-status success';
             return;
         }
 
-        // Filter out checked-off items — Skylight marks them as "complete"
         const activeItems = allSkylightItems.filter(i => i.status !== 'complete');
-        // If ALL items are "complete" (older edge function returns only label/status),
-        // use all items as fallback — the deployed function may not support this filter yet
         const itemsToSync = activeItems.length > 0 ? activeItems : allSkylightItems;
         const usedFilter = activeItems.length > 0;
 
@@ -1612,13 +1650,6 @@ async function syncFromSkylight() {
         const newItems = itemsToSync
             .map(i => i.label)
             .filter(label => label && !existingNames.has(label.toLowerCase().trim()));
-
-        if (newItems.length === 0) {
-            const skyPreview = allSkylightItems.slice(0, 5).map(i => i.label).join(', ');
-            statusEl.textContent = `No new items. Skylight has ${allSkylightItems.length} items (${skyPreview}...) — all already in your list.`;
-            statusEl.className = 'sync-status success';
-            return;
-        }
 
         // Insert new items directly via supabase
         const addedNames = [];
@@ -1642,28 +1673,33 @@ async function syncFromSkylight() {
         }
 
         if (addedNames.length > 0) {
-            // Bump list updated_at
             await window.supabase
                 .from('grocery_lists')
                 .update({ updated_at: new Date().toISOString() })
                 .eq('id', state.currentList.id);
+        }
 
-            statusEl.textContent = `✅ Added ${addedNames.length}: ${addedNames.join(', ')}`;
+        const parts = [];
+        if (pushedCount > 0) parts.push(`Pushed ${pushedCount} to Skylight`);
+        if (addedNames.length > 0) parts.push(`Added ${addedNames.length}: ${addedNames.join(', ')}`);
+
+        if (parts.length > 0) {
+            statusEl.textContent = `✅ ${parts.join(' | ')}`;
             statusEl.className = 'sync-status success';
-            showToast(`Added ${addedNames.length} items from Skylight`, 'success');
+            showToast('Synced with Skylight', 'success');
             await loadFromDatabase();
         } else {
-            statusEl.textContent = `No new items to add from Skylight.`;
+            statusEl.textContent = '✅ Everything in sync with Skylight';
             statusEl.className = 'sync-status success';
         }
     } catch (error) {
-        console.error('Sync from Skylight failed:', error);
+        console.error('Sync with Skylight failed:', error);
         statusEl.textContent = '❌ Connection error';
         statusEl.className = 'sync-status error';
         showToast('Failed to connect to Skylight', 'error');
     } finally {
         btn.disabled = false;
-        btn.textContent = '📥 Sync from Skylight';
+        btn.textContent = '🔄 Sync with Skylight';
     }
 }
 
