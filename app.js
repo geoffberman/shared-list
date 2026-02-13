@@ -1486,7 +1486,10 @@ async function syncToSkylight(items) {
             'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight',
             {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                },
                 body: JSON.stringify({ items: items.map(i => typeof i === 'string' ? i : i.name) })
             }
         );
@@ -1525,7 +1528,10 @@ async function syncFromSkylight() {
             'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-from-skylight',
             {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                },
                 body: JSON.stringify({ userId: state.currentUser.id })
             }
         );
@@ -1659,7 +1665,10 @@ async function deleteFromSkylight(itemName) {
             'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight',
             {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                },
                 body: JSON.stringify({ deleteItems: [itemName] })
             }
         );
