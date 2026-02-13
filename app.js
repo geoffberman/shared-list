@@ -1594,6 +1594,11 @@ async function toggleItem(itemId) {
         saveToLocalStorage();
     }
 
+    // Sync check-off to Skylight (mark as complete = remove from active list)
+    if (item.is_checked && item.name) {
+        deleteFromSkylight(item.name);
+    }
+
     renderItems();
 }
 
@@ -1618,8 +1623,36 @@ async function deleteItem(itemId) {
         }
     }
 
+    // Sync delete to Skylight (best effort, fails silently)
     if (itemName) {
+        deleteFromSkylight(itemName);
         showToast(`Removed "${itemName}"`, 'info');
+    }
+}
+
+/**
+ * Delete an item from Skylight Calendar grocery list (best effort, fails silently)
+ */
+async function deleteFromSkylight(itemName) {
+    if (!itemName) return;
+
+    try {
+        const response = await fetch(
+            'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight',
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deleteItems: [itemName] })
+            }
+        );
+
+        if (response.ok) {
+            const result = await response.json();
+            console.log('Skylight delete sync:', result.message);
+        }
+    } catch (error) {
+        // Fail silently - Skylight sync is optional
+        console.error('Skylight delete sync failed:', error);
     }
 }
 

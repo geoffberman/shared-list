@@ -48,6 +48,17 @@ interface SkylightListItemResponse {
   };
 }
 
+interface SkylightListItemsResponse {
+  data: {
+    id: string;
+    type: "list_item";
+    attributes: {
+      label: string;
+      status: string;
+    };
+  }[];
+}
+
 // Cache auth token in memory (per function invocation)
 let cachedAuth: { userId: string; token: string } | null = null;
 
@@ -116,6 +127,11 @@ async function skylightRequest<T>(
     throw new Error(`Skylight API error: HTTP ${response.status} for ${method} ${resolvedEndpoint}`);
   }
 
+  // DELETE often returns 204 No Content
+  if (response.status === 204 || response.headers.get("content-length") === "0") {
+    return {} as T;
+  }
+
   return response.json() as Promise<T>;
 }
 
@@ -171,6 +187,51 @@ async function addItemToList(
   );
 }
 
+/**
+ * Delete items from a Skylight list by name (case-insensitive match)
+ */
+async function deleteItemsFromList(
+  auth: { userId: string; token: string },
+  frameId: string,
+  listId: string,
+  itemNames: string[]
+): Promise<{ deleted: string[]; notFound: string[] }> {
+  // Fetch all items from the Skylight list
+  const allItems = await skylightRequest<SkylightListItemsResponse>(
+    `/api/frames/{frameId}/lists/${listId}/list_items`,
+    auth,
+    frameId
+  );
+
+  const namesToDelete = new Set(itemNames.map(n => n.toLowerCase().trim()));
+  const deleted: string[] = [];
+  const notFound = [...itemNames];
+
+  for (const item of allItems.data) {
+    const label = item.attributes.label.toLowerCase().trim();
+    if (namesToDelete.has(label)) {
+      // Delete this item from Skylight
+      try {
+        await skylightRequest<unknown>(
+          `/api/frames/{frameId}/lists/${listId}/list_items/${item.id}`,
+          auth,
+          frameId,
+          { method: "DELETE" }
+        );
+        deleted.push(item.attributes.label);
+        // Remove from notFound
+        const idx = notFound.findIndex(n => n.toLowerCase().trim() === label);
+        if (idx >= 0) notFound.splice(idx, 1);
+        console.log(`Deleted from Skylight: ${item.attributes.label}`);
+      } catch (err) {
+        console.error(`Failed to delete ${item.attributes.label}:`, err);
+      }
+    }
+  }
+
+  return { deleted, notFound };
+}
+
 // Main handler
 Deno.serve(async (req: Request) => {
   // Handle CORS preflight
@@ -201,12 +262,13 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Parse request body
-    const { items } = (await req.json()) as { items: string[] };
+    // Parse request body — supports { items: [...] } for add and { deleteItems: [...] } for delete
+    const body = (await req.json()) as { items?: string[]; deleteItems?: string[] };
+    const { items, deleteItems } = body;
 
-    if (!items || !Array.isArray(items) || items.length === 0) {
+    if ((!items || items.length === 0) && (!deleteItems || deleteItems.length === 0)) {
       return new Response(
-        JSON.stringify({ error: "No items provided" }),
+        JSON.stringify({ error: "No items or deleteItems provided" }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -234,29 +296,41 @@ Deno.serve(async (req: Request) => {
 
     console.log(`Found grocery list: ${groceryList.attributes.label} (${groceryList.id})`);
 
-    // Add each item
-    const results: { item: string; success: boolean; error?: string }[] = [];
-
-    for (const item of items) {
-      try {
-        await addItemToList(auth, frameId, groceryList.id, item);
-        results.push({ item, success: true });
-        console.log(`Added: ${item}`);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Unknown error";
-        results.push({ item, success: false, error: errorMessage });
-        console.error(`Failed to add ${item}: ${errorMessage}`);
+    // Handle adds
+    const addResults: { item: string; success: boolean; error?: string }[] = [];
+    if (items && items.length > 0) {
+      for (const item of items) {
+        try {
+          await addItemToList(auth, frameId, groceryList.id, item);
+          addResults.push({ item, success: true });
+          console.log(`Added: ${item}`);
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : "Unknown error";
+          addResults.push({ item, success: false, error: errorMessage });
+          console.error(`Failed to add ${item}: ${errorMessage}`);
+        }
       }
     }
 
-    const successCount = results.filter((r) => r.success).length;
+    // Handle deletes
+    let deleteResult = { deleted: [] as string[], notFound: [] as string[] };
+    if (deleteItems && deleteItems.length > 0) {
+      deleteResult = await deleteItemsFromList(auth, frameId, groceryList.id, deleteItems);
+    }
+
+    const addedCount = addResults.filter((r) => r.success).length;
+    const parts: string[] = [];
+    if (addedCount > 0) parts.push(`Added ${addedCount}/${items?.length ?? 0}`);
+    if (deleteResult.deleted.length > 0) parts.push(`Deleted ${deleteResult.deleted.length}`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Added ${successCount}/${items.length} items to Skylight`,
+        message: `${parts.join(", ")} items in Skylight`,
         listName: groceryList.attributes.label,
-        results,
+        results: addResults,
+        deleted: deleteResult.deleted,
+        notFound: deleteResult.notFound,
       }),
       {
         status: 200,
