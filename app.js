@@ -1565,13 +1565,25 @@ async function syncFromSkylight() {
         const d = result.debug || {};
         const allSkylightItems = d.skylightAllItems || [];
 
+        // Log all item data to help diagnose which fields distinguish active vs checked-off
+        console.log('Skylight items full data:', JSON.stringify(allSkylightItems.slice(0, 3), null, 2));
+        console.log('Unique statuses:', [...new Set(allSkylightItems.map(i => i.status))]);
+        console.log('Sample raw item:', JSON.stringify(d.sampleRawItem, null, 2));
+
         if (allSkylightItems.length === 0) {
             statusEl.textContent = 'No items found in Skylight.';
             statusEl.className = 'sync-status success';
             return;
         }
 
-        statusEl.textContent = `Found ${allSkylightItems.length} Skylight items, checking for new ones...`;
+        // Filter out checked-off items — Skylight marks them as "complete"
+        const activeItems = allSkylightItems.filter(i => i.status !== 'complete');
+        // If ALL items are "complete" (older edge function returns only label/status),
+        // use all items as fallback — the deployed function may not support this filter yet
+        const itemsToSync = activeItems.length > 0 ? activeItems : allSkylightItems;
+        const usedFilter = activeItems.length > 0;
+
+        statusEl.textContent = `Found ${allSkylightItems.length} Skylight items${usedFilter ? ` (${activeItems.length} active)` : ''}, checking for new ones...`;
 
         // Get all existing items in the current list (checked + unchecked)
         const { data: existingItems } = await window.supabase
@@ -1584,7 +1596,7 @@ async function syncFromSkylight() {
         );
 
         // Find items in Skylight that aren't in our app
-        const newItems = allSkylightItems
+        const newItems = itemsToSync
             .map(i => i.label)
             .filter(label => label && !existingNames.has(label.toLowerCase().trim()));
 
