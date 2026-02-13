@@ -161,13 +161,13 @@ Deno.serve(async (req: Request) => {
       status: i.attributes?.status,
     }));
 
-    // Include all items that aren't checked off in Skylight
-    const incompleteItems = itemsArray.filter(
-      (item) => item.attributes?.status !== "complete"
-    );
-    // Log unique statuses so we can see what Skylight actually uses
+    // Log unique statuses so we can understand Skylight's data model
     const uniqueStatuses = [...new Set(itemsArray.map(i => i.attributes?.status))];
     debug.uniqueStatuses = uniqueStatuses;
+
+    // Use all items from the Skylight shopping list (no status filter —
+    // Skylight shopping lists appear to mark all items as "complete")
+    const incompleteItems = itemsArray;
     debug.incompleteCount = incompleteItems.length;
     debug.incompleteItems = incompleteItems.map(i => i.attributes?.label);
 
