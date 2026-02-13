@@ -1519,6 +1519,7 @@ async function syncFromSkylight() {
         );
 
         const result = await response.json();
+        console.log('Skylight sync result:', JSON.stringify(result, null, 2));
 
         if (response.ok && result.success) {
             const hasAdded = result.added > 0;

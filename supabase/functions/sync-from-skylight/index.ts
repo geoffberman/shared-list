@@ -53,14 +53,14 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // Get Skylight credentials
-    const skylightUserId = Deno.env.get("SKYLIGHT_USER_ID");
-    const skylightToken = Deno.env.get("SKYLIGHT_TOKEN");
+    // Get Skylight credentials — use email/password login (same as sync-skylight)
+    const skylightEmail = Deno.env.get("SKYLIGHT_EMAIL");
+    const skylightPassword = Deno.env.get("SKYLIGHT_PASSWORD");
     const frameId = Deno.env.get("SKYLIGHT_FRAME_ID");
 
-    if (!skylightUserId || !skylightToken || !frameId) {
+    if (!skylightEmail || !skylightPassword || !frameId) {
       return new Response(
-        JSON.stringify({ error: "Skylight not configured" }),
+        JSON.stringify({ error: "Skylight not configured", details: "Missing SKYLIGHT_EMAIL, SKYLIGHT_PASSWORD, or SKYLIGHT_FRAME_ID" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -79,7 +79,24 @@ Deno.serve(async (req: Request) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Set up Skylight auth
+    // Login to Skylight to get a fresh auth token (tokens expire)
+    const loginRes = await fetch("https://app.ourskylight.com/api/sessions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      body: JSON.stringify({ email: skylightEmail, password: skylightPassword }),
+    });
+
+    if (!loginRes.ok) {
+      throw new Error(`Skylight login failed: HTTP ${loginRes.status}`);
+    }
+
+    const loginData = await loginRes.json();
+    const skylightUserId = loginData.data.id;
+    const skylightToken = loginData.data.attributes.token;
+
     const credentials = btoa(`${skylightUserId}:${skylightToken}`);
     const skylightHeaders = {
       "Authorization": `Basic ${credentials}`,
@@ -213,7 +230,14 @@ Deno.serve(async (req: Request) => {
           message: "All Skylight items already in your list",
           added: 0,
           removed: 0,
-          skylightTotal: incompleteItems.length
+          skylightTotal: incompleteItems.length,
+          debug: {
+            skylightItemCount: skylightItems.data.length,
+            incompleteCount: incompleteItems.length,
+            existingAppItems: (existingItems || []).length,
+            skylightItemNames: incompleteItems.map((i) => i.attributes.label),
+            existingItemNames: (existingItems || []).map((i) => i.name),
+          }
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
