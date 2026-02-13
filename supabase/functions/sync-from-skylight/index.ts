@@ -116,17 +116,16 @@ Deno.serve(async (req: Request) => {
     }
     const skylightItems: SkylightListItemsResponse = await itemsRes.json();
 
-    // Get only incomplete (unchecked) items from Skylight
+    // Get incomplete (unchecked) items from Skylight
+    // Use !== "complete" instead of === "incomplete" to be robust against status value changes
     const incompleteItems = skylightItems.data.filter(
-      (item) => item.attributes.status === "incomplete"
+      (item) => item.attributes.status !== "complete"
     );
 
-    if (incompleteItems.length === 0) {
-      return new Response(
-        JSON.stringify({ success: true, message: "No new items to sync", added: 0 }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    // Build a set of ALL Skylight item names (for delete sync)
+    const allSkylightNames = new Set(
+      skylightItems.data.map((item) => item.attributes.label.toLowerCase().trim())
+    );
 
     // Find the active grocery list in our app
     // If targetUserId provided, use that user's list; otherwise find any active family list
@@ -163,27 +162,57 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Get existing items in our grocery list to avoid duplicates
+    // Get existing UNCHECKED items in our grocery list to avoid duplicates
+    // Only compare against unchecked items so checked-off items can be re-added
     const { data: existingItems } = await supabase
       .from("grocery_items")
       .select("name")
-      .eq("list_id", activeList.id);
+      .eq("list_id", activeList.id)
+      .eq("is_checked", false);
 
     const existingNames = new Set(
-      (existingItems || []).map((i) => i.name.toLowerCase())
+      (existingItems || []).map((i) => i.name.toLowerCase().trim())
     );
 
-    // Filter out items that already exist in our list
+    // Filter out items that already exist (unchecked) in our list
     const newItems = incompleteItems.filter(
-      (item) => !existingNames.has(item.attributes.label.toLowerCase())
+      (item) => !existingNames.has(item.attributes.label.toLowerCase().trim())
     );
 
-    if (newItems.length === 0) {
+    // Delete sync: remove items that were synced from Skylight but no longer exist there
+    const { data: skylightSyncedItems } = await supabase
+      .from("grocery_items")
+      .select("id, name")
+      .eq("list_id", activeList.id)
+      .eq("notes", "From Skylight")
+      .eq("is_checked", false);
+
+    const itemsToDelete = (skylightSyncedItems || []).filter(
+      (item) => !allSkylightNames.has(item.name.toLowerCase().trim())
+    );
+
+    let removedCount = 0;
+    let removedNames: string[] = [];
+    if (itemsToDelete.length > 0) {
+      const { error: deleteError } = await supabase
+        .from("grocery_items")
+        .delete()
+        .in("id", itemsToDelete.map((i) => i.id));
+
+      if (!deleteError) {
+        removedCount = itemsToDelete.length;
+        removedNames = itemsToDelete.map((i) => i.name);
+        console.log(`Removed ${removedCount} items no longer on Skylight:`, removedNames);
+      }
+    }
+
+    if (newItems.length === 0 && removedCount === 0) {
       return new Response(
         JSON.stringify({
           success: true,
           message: "All Skylight items already in your list",
           added: 0,
+          removed: 0,
           skylightTotal: incompleteItems.length
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -191,22 +220,28 @@ Deno.serve(async (req: Request) => {
     }
 
     // Add new items to our grocery list
-    const itemsToInsert = newItems.map((item) => ({
-      list_id: activeList.id,
-      name: item.attributes.label,
-      category: autoCategorize(item.attributes.label),
-      is_checked: false,
-      added_by: activeList.user_id,
-      notes: "From Skylight",
-    }));
+    let addedNames: string[] = [];
+    if (newItems.length > 0) {
+      const itemsToInsert = newItems.map((item) => ({
+        list_id: activeList.id,
+        name: item.attributes.label,
+        category: autoCategorize(item.attributes.label),
+        is_checked: false,
+        added_by: activeList.user_id,
+        notes: "From Skylight",
+      }));
 
-    const { data: insertedItems, error: insertError } = await supabase
-      .from("grocery_items")
-      .insert(itemsToInsert)
-      .select();
+      const { error: insertError } = await supabase
+        .from("grocery_items")
+        .insert(itemsToInsert)
+        .select();
 
-    if (insertError) {
-      throw new Error(`Failed to insert items: ${insertError.message}`);
+      if (insertError) {
+        throw new Error(`Failed to insert items: ${insertError.message}`);
+      }
+
+      addedNames = newItems.map((i) => i.attributes.label);
+      console.log(`Synced ${addedNames.length} items from Skylight:`, addedNames);
     }
 
     // Bump the list's updated_at
@@ -215,15 +250,22 @@ Deno.serve(async (req: Request) => {
       .update({ updated_at: new Date().toISOString() })
       .eq("id", activeList.id);
 
-    const addedNames = newItems.map((i) => i.attributes.label);
-    console.log(`Synced ${addedNames.length} items from Skylight:`, addedNames);
+    const parts: string[] = [];
+    if (addedNames.length > 0) {
+      parts.push(`Added ${addedNames.length} item${addedNames.length !== 1 ? "s" : ""}`);
+    }
+    if (removedCount > 0) {
+      parts.push(`Removed ${removedCount} item${removedCount !== 1 ? "s" : ""}`);
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Added ${addedNames.length} item${addedNames.length !== 1 ? "s" : ""} from Skylight`,
+        message: parts.join(", "),
         added: addedNames.length,
         items: addedNames,
+        removed: removedCount,
+        removedItems: removedNames,
         skylightTotal: incompleteItems.length,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

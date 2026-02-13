@@ -1521,14 +1521,28 @@ async function syncFromSkylight() {
         const result = await response.json();
 
         if (response.ok && result.success) {
-            if (result.added > 0) {
-                statusEl.textContent = `✅ Added ${result.added} item${result.added !== 1 ? 's' : ''}: ${result.items.join(', ')}`;
+            const hasAdded = result.added > 0;
+            const hasRemoved = result.removed > 0;
+
+            if (hasAdded || hasRemoved) {
+                const parts = [];
+                if (hasAdded) {
+                    parts.push(`Added ${result.added}: ${result.items.join(', ')}`);
+                }
+                if (hasRemoved) {
+                    parts.push(`Removed ${result.removed}: ${result.removedItems.join(', ')}`);
+                }
+                statusEl.textContent = `✅ ${parts.join(' | ')}`;
                 statusEl.className = 'sync-status success';
-                showToast(`Added ${result.added} item${result.added !== 1 ? 's' : ''} from Skylight`, 'success');
-                // Refresh the list to show new items
+
+                const toastParts = [];
+                if (hasAdded) toastParts.push(`Added ${result.added}`);
+                if (hasRemoved) toastParts.push(`Removed ${result.removed}`);
+                showToast(`${toastParts.join(', ')} from Skylight sync`, 'success');
+                // Refresh the list to show changes
                 await loadItems();
             } else {
-                statusEl.textContent = '✅ Already in sync - no new items';
+                statusEl.textContent = '✅ Already in sync - no changes';
                 statusEl.className = 'sync-status success';
                 showToast('Already in sync with Skylight', 'info');
             }
