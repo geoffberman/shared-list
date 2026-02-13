@@ -1419,10 +1419,8 @@ async function addItem() {
 
     showToast(`Added "${name}"`, 'success');
 
-    // Sync to Skylight (called here, outside addItemToDatabase's try/catch)
-    if (addedToDb) {
-        syncToSkylight([name]);
-    }
+    // Always sync to Skylight — even if DB insert failed, the item exists locally
+    syncToSkylight([name]);
 }
 
 async function addItemToDatabase(item) {
