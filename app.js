@@ -1540,7 +1540,7 @@ async function syncFromSkylight() {
                 if (hasRemoved) toastParts.push(`Removed ${result.removed}`);
                 showToast(`${toastParts.join(', ')} from Skylight sync`, 'success');
                 // Refresh the list to show changes
-                await loadItems();
+                await loadFromDatabase();
             } else {
                 statusEl.textContent = '✅ Already in sync - no changes';
                 statusEl.className = 'sync-status success';
