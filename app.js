@@ -1516,6 +1516,11 @@ async function syncFromSkylight() {
         return;
     }
 
+    if (!window.supabase || !state.currentList?.id) {
+        showToast('Not connected to database', 'error');
+        return;
+    }
+
     // Show loading state
     btn.disabled = true;
     btn.textContent = '⏳ Syncing...';
@@ -1524,6 +1529,7 @@ async function syncFromSkylight() {
     statusEl.className = 'sync-status';
 
     try {
+        // Call the edge function — it fetches Skylight data and returns it in debug
         const response = await fetch(
             'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-from-skylight',
             {
@@ -1539,49 +1545,91 @@ async function syncFromSkylight() {
         const result = await response.json();
         console.log('Skylight sync result:', JSON.stringify(result, null, 2));
 
-        if (response.ok && result.success) {
-            const hasAdded = result.added > 0;
-            const hasRemoved = result.removed > 0;
-
-            if (hasAdded || hasRemoved) {
-                const parts = [];
-                if (hasAdded) {
-                    parts.push(`Added ${result.added}: ${result.items.join(', ')}`);
-                }
-                if (hasRemoved) {
-                    parts.push(`Removed ${result.removed}: ${result.removedItems.join(', ')}`);
-                }
-                statusEl.textContent = `✅ ${parts.join(' | ')}`;
-                statusEl.className = 'sync-status success';
-
-                const toastParts = [];
-                if (hasAdded) toastParts.push(`Added ${result.added}`);
-                if (hasRemoved) toastParts.push(`Removed ${result.removed}`);
-                showToast(`${toastParts.join(', ')} from Skylight sync`, 'success');
-                // Refresh the list to show changes
-                await loadFromDatabase();
-            } else {
-                const d = result.debug || {};
-                const skyItems = d.incompleteItems || [];
-                const appItems = d.existingUncheckedNames || [];
-                const ver = d.version || 'unknown';
-                let detail;
-                if (skyItems.length > 0) {
-                    const skyPreview = skyItems.slice(0, 5).join(', ') + (skyItems.length > 5 ? ` (+${skyItems.length - 5} more)` : '');
-                    const appPreview = appItems.slice(0, 5).join(', ') + (appItems.length > 5 ? ` (+${appItems.length - 5} more)` : '');
-                    detail = `Skylight has: ${skyPreview} | App has: ${appPreview}`;
-                } else {
-                    detail = `Skylight returned ${d.skylightTotalItems ?? '?'} items but 0 passed filter (statuses: ${(d.uniqueStatuses || []).join(', ') || '?'}) [${ver}]`;
-                }
-                statusEl.textContent = `No new items. ${detail}`;
-                statusEl.className = 'sync-status success';
+        // If the edge function already added items, use that result
+        if (response.ok && result.success && (result.added > 0 || result.removed > 0)) {
+            const parts = [];
+            if (result.added > 0) {
+                parts.push(`Added ${result.added}: ${result.items.join(', ')}`);
             }
+            if (result.removed > 0) {
+                parts.push(`Removed ${result.removed}: ${result.removedItems.join(', ')}`);
+            }
+            statusEl.textContent = `✅ ${parts.join(' | ')}`;
+            statusEl.className = 'sync-status success';
+            showToast(`Synced from Skylight`, 'success');
+            await loadFromDatabase();
+            return;
+        }
+
+        // Edge function didn't add anything — use debug.skylightAllItems to sync from frontend
+        const d = result.debug || {};
+        const allSkylightItems = d.skylightAllItems || [];
+
+        if (allSkylightItems.length === 0) {
+            statusEl.textContent = 'No items found in Skylight.';
+            statusEl.className = 'sync-status success';
+            return;
+        }
+
+        statusEl.textContent = `Found ${allSkylightItems.length} Skylight items, checking for new ones...`;
+
+        // Get all existing items in the current list (checked + unchecked)
+        const { data: existingItems } = await window.supabase
+            .from('grocery_items')
+            .select('name')
+            .eq('list_id', state.currentList.id);
+
+        const existingNames = new Set(
+            (existingItems || []).map(i => i.name.toLowerCase().trim())
+        );
+
+        // Find items in Skylight that aren't in our app
+        const newItems = allSkylightItems
+            .map(i => i.label)
+            .filter(label => label && !existingNames.has(label.toLowerCase().trim()));
+
+        if (newItems.length === 0) {
+            const skyPreview = allSkylightItems.slice(0, 5).map(i => i.label).join(', ');
+            statusEl.textContent = `No new items. Skylight has ${allSkylightItems.length} items (${skyPreview}...) — all already in your list.`;
+            statusEl.className = 'sync-status success';
+            return;
+        }
+
+        // Insert new items directly via supabase
+        const addedNames = [];
+        for (const name of newItems) {
+            const { error } = await window.supabase
+                .from('grocery_items')
+                .insert({
+                    list_id: state.currentList.id,
+                    name: name,
+                    category: autoCategorize(name),
+                    is_checked: false,
+                    added_by: state.currentUser.id,
+                    notes: 'From Skylight',
+                });
+
+            if (!error) {
+                addedNames.push(name);
+            } else if (error.code !== '23505') {
+                console.error(`Failed to insert ${name}:`, error.message);
+            }
+        }
+
+        if (addedNames.length > 0) {
+            // Bump list updated_at
+            await window.supabase
+                .from('grocery_lists')
+                .update({ updated_at: new Date().toISOString() })
+                .eq('id', state.currentList.id);
+
+            statusEl.textContent = `✅ Added ${addedNames.length}: ${addedNames.join(', ')}`;
+            statusEl.className = 'sync-status success';
+            showToast(`Added ${addedNames.length} items from Skylight`, 'success');
+            await loadFromDatabase();
         } else {
-            const d = result.debug || {};
-            const errDetail = result.details || '';
-            statusEl.textContent = `❌ ${result.error || 'Sync failed'}${errDetail ? ': ' + errDetail : ''} (auth: ${d.authMethod || 'n/a'})`;
-            statusEl.className = 'sync-status error';
-            showToast(result.error || 'Failed to sync from Skylight', 'error');
+            statusEl.textContent = `No new items to add from Skylight.`;
+            statusEl.className = 'sync-status success';
         }
     } catch (error) {
         console.error('Sync from Skylight failed:', error);
