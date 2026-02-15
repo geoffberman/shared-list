@@ -1542,35 +1542,7 @@ async function syncFromSkylight() {
     statusEl.className = 'sync-status';
 
     try {
-        // --- Step 1: Push unchecked app items TO Skylight ---
-        const uncheckedItems = state.items.filter(i => !i.is_checked);
-        const itemNames = uncheckedItems.map(i => i.name);
-        let pushedCount = 0;
-
-        if (itemNames.length > 0) {
-            try {
-                const pushResponse = await fetch(
-                    'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight',
-                    {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                        },
-                        body: JSON.stringify({ items: itemNames })
-                    }
-                );
-                const pushResult = await pushResponse.json();
-                console.log('Push to Skylight result:', JSON.stringify(pushResult));
-                if (pushResult.results) {
-                    pushedCount = pushResult.results.filter(r => r.success).length;
-                }
-            } catch (pushError) {
-                console.error('Push to Skylight failed (continuing with pull):', pushError);
-            }
-        }
-
-        // --- Step 2: Pull from Skylight (adds new items + removes checked-off items) ---
+        // --- Step 1: Pull from Skylight (adds new items + removes checked-off items) ---
         statusEl.textContent = 'Pulling updates from Skylight...';
 
         const response = await fetch(
@@ -1587,6 +1559,49 @@ async function syncFromSkylight() {
 
         const result = await response.json();
         console.log('Skylight sync result:', JSON.stringify(result, null, 2));
+
+        // Build set of items already in Skylight (from pull response) to avoid push duplicates
+        const skylightNames = new Set();
+        const allSkylightItems = result.debug?.skylightAllItems || [];
+        for (const si of allSkylightItems) {
+            const label = (si.label || '').toLowerCase().trim();
+            if (label) skylightNames.add(label);
+        }
+        console.log(`Skylight has ${skylightNames.size} items, used for push dedup`);
+
+        // --- Step 2: Push unchecked app items TO Skylight (only items not already there) ---
+        statusEl.textContent = 'Pushing new items to Skylight...';
+        const uncheckedItems = state.items.filter(i => !i.is_checked);
+        const itemsToPush = uncheckedItems
+            .map(i => i.name)
+            .filter(name => !skylightNames.has(name.toLowerCase().trim()));
+        let pushedCount = 0;
+
+        if (itemsToPush.length > 0) {
+            console.log(`Pushing ${itemsToPush.length} new items to Skylight (skipped ${uncheckedItems.length - itemsToPush.length} already there)`);
+            try {
+                const pushResponse = await fetch(
+                    'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight',
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                        },
+                        body: JSON.stringify({ items: itemsToPush })
+                    }
+                );
+                const pushResult = await pushResponse.json();
+                console.log('Push to Skylight result:', JSON.stringify(pushResult));
+                if (pushResult.results) {
+                    pushedCount = pushResult.results.filter(r => r.success).length;
+                }
+            } catch (pushError) {
+                console.error('Push to Skylight failed:', pushError);
+            }
+        } else {
+            console.log(`All ${uncheckedItems.length} unchecked items already in Skylight, nothing to push`);
+        }
 
         // If the edge function already added/removed items, use that result
         if (response.ok && result.success) {
