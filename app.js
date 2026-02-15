@@ -1414,19 +1414,9 @@ async function addItem() {
         renderItems();
     }
 
-    // Push this single item directly to Skylight (simple POST, no dedup needed)
-    console.log('addItem: pushing to Skylight:', name);
-    fetch('https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-        },
-        body: JSON.stringify({ items: [name] })
-    })
-    .then(r => r.json())
-    .then(result => console.log('addItem: Skylight push result:', JSON.stringify(result)))
-    .catch(err => console.error('addItem: Skylight push failed:', err));
+    // Trigger the same sync as the "Sync to Skylight" button
+    console.log('addItem: triggering Skylight sync for:', name);
+    syncFromSkylight();
 
     // Clear inputs
     elements.itemInput.value = '';
