@@ -22,8 +22,6 @@ const state = {
     skylightSyncInProgress: false
 };
 
-// Debounce timer for triggering Skylight sync after item adds
-let skylightSyncDebounceTimer = null;
 
 // ============================================================================
 // DOM ELEMENTS
@@ -1416,8 +1414,19 @@ async function addItem() {
         renderItems();
     }
 
-    // Trigger full Skylight sync after item is in DB (debounced so rapid adds batch together)
-    scheduleSkylightSync();
+    // Push this single item directly to Skylight (simple POST, no dedup needed)
+    console.log('addItem: pushing to Skylight:', name);
+    fetch('https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({ items: [name] })
+    })
+    .then(r => r.json())
+    .then(result => console.log('addItem: Skylight push result:', JSON.stringify(result)))
+    .catch(err => console.error('addItem: Skylight push failed:', err));
 
     // Clear inputs
     elements.itemInput.value = '';
@@ -1486,30 +1495,10 @@ async function addItemToDatabase(item) {
 }
 
 /**
- * Debounced trigger for Skylight sync — waits 3 seconds after last call
- * so rapid item adds batch into a single sync.
- */
-function scheduleSkylightSync() {
-    if (skylightSyncDebounceTimer) clearTimeout(skylightSyncDebounceTimer);
-    skylightSyncDebounceTimer = setTimeout(() => {
-        console.log('Debounced Skylight sync: triggering full sync');
-        syncFromSkylight();
-    }, 3000);
-}
-
-/**
  * Hourly scheduled sync with Skylight (8am–10pm).
- * Checks every 60 minutes and triggers the full two-way sync button logic.
+ * Triggers the full two-way sync button logic every 60 minutes.
  */
 function setupScheduledSync() {
-    // Run immediately on app load if within sync hours
-    const nowHour = new Date().getHours();
-    if (nowHour >= 8 && nowHour <= 22 && state.currentUser) {
-        console.log('Scheduled sync: initial sync on app load');
-        syncFromSkylight();
-    }
-
-    // Then check every 60 minutes
     setInterval(() => {
         const hour = new Date().getHours();
         if (hour >= 8 && hour <= 22 && state.currentUser) {
