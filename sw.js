@@ -1,5 +1,5 @@
 // Service Worker for Shared List Grocery App
-const CACHE_NAME = 'shared-list-v9';
+const CACHE_NAME = 'shared-list-v10';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -67,26 +67,16 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // Cache-first for static assets
+    // Network-first for static assets (so code updates load immediately)
     event.respondWith(
-        caches.match(request).then((cachedResponse) => {
-            if (cachedResponse) {
-                // Return cached version but also update cache in background
-                fetch(request).then((response) => {
-                    caches.open(CACHE_NAME).then((cache) => {
-                        cache.put(request, response);
-                    });
-                }).catch(() => {});
-                return cachedResponse;
-            }
-
-            return fetch(request).then((response) => {
+        fetch(request)
+            .then((response) => {
                 const clone = response.clone();
                 caches.open(CACHE_NAME).then((cache) => {
                     cache.put(request, clone);
                 });
                 return response;
-            });
-        })
+            })
+            .catch(() => caches.match(request))
     );
 });
