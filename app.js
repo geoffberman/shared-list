@@ -18,8 +18,12 @@ const state = {
         autoAddFrequent: true,
         groupByCategory: false
     },
-    realtimeSubscription: null
+    realtimeSubscription: null,
+    skylightSyncInProgress: false
 };
+
+// Debounce timer for triggering Skylight sync after item adds
+let skylightSyncDebounceTimer = null;
 
 // ============================================================================
 // DOM ELEMENTS
@@ -167,6 +171,9 @@ async function init() {
                 handleSignOut();
             }
         });
+
+        // Start hourly Skylight sync (8am–10pm)
+        setupScheduledSync();
     } else {
         // No Supabase, use localStorage only
         console.log('Running in offline mode');
@@ -1400,14 +1407,6 @@ async function addItem() {
         created_at: new Date().toISOString()
     };
 
-    // Sync to Skylight immediately (independent of DB)
-    console.log('addItem: about to call syncToSkylight for', name);
-    syncToSkylight([name]).then(() => {
-        console.log('addItem: syncToSkylight completed for', name);
-    }).catch(err => {
-        console.error('addItem: syncToSkylight failed for', name, err);
-    });
-
     if (window.supabase && state.currentUser && state.currentList?.id) {
         await addItemToDatabase(newItem);
     } else {
@@ -1416,6 +1415,9 @@ async function addItem() {
         saveToLocalStorage();
         renderItems();
     }
+
+    // Trigger full Skylight sync after item is in DB (debounced so rapid adds batch together)
+    scheduleSkylightSync();
 
     // Clear inputs
     elements.itemInput.value = '';
@@ -1484,6 +1486,40 @@ async function addItemToDatabase(item) {
 }
 
 /**
+ * Debounced trigger for Skylight sync — waits 3 seconds after last call
+ * so rapid item adds batch into a single sync.
+ */
+function scheduleSkylightSync() {
+    if (skylightSyncDebounceTimer) clearTimeout(skylightSyncDebounceTimer);
+    skylightSyncDebounceTimer = setTimeout(() => {
+        console.log('Debounced Skylight sync: triggering full sync');
+        syncFromSkylight();
+    }, 3000);
+}
+
+/**
+ * Hourly scheduled sync with Skylight (8am–10pm).
+ * Checks every 60 minutes and triggers the full two-way sync button logic.
+ */
+function setupScheduledSync() {
+    // Run immediately on app load if within sync hours
+    const nowHour = new Date().getHours();
+    if (nowHour >= 8 && nowHour <= 22 && state.currentUser) {
+        console.log('Scheduled sync: initial sync on app load');
+        syncFromSkylight();
+    }
+
+    // Then check every 60 minutes
+    setInterval(() => {
+        const hour = new Date().getHours();
+        if (hour >= 8 && hour <= 22 && state.currentUser) {
+            console.log('Scheduled sync: hourly Skylight sync at', new Date().toLocaleTimeString());
+            syncFromSkylight();
+        }
+    }, 60 * 60 * 1000);
+}
+
+/**
  * Sync items to Skylight Calendar grocery list (best effort, fails silently)
  */
 async function syncToSkylight(items) {
@@ -1530,14 +1566,19 @@ async function syncFromSkylight() {
     const btn = elements.syncFromSkylightBtn;
 
     if (!state.currentUser) {
-        showToast('Please sign in first', 'error');
         return;
     }
 
     if (!window.supabase || !state.currentList?.id) {
-        showToast('Not connected to database', 'error');
         return;
     }
+
+    // Prevent concurrent syncs
+    if (state.skylightSyncInProgress) {
+        console.log('Skylight sync already in progress, skipping');
+        return;
+    }
+    state.skylightSyncInProgress = true;
 
     // Show loading state
     btn.disabled = true;
@@ -1714,6 +1755,7 @@ async function syncFromSkylight() {
         statusEl.className = 'sync-status error';
         showToast('Failed to connect to Skylight', 'error');
     } finally {
+        state.skylightSyncInProgress = false;
         btn.disabled = false;
         btn.textContent = '🔄 Sync with Skylight';
     }
