@@ -1400,8 +1400,13 @@ async function addItem() {
         created_at: new Date().toISOString()
     };
 
-    // Sync to Skylight immediately (fire-and-forget, independent of DB)
-    syncToSkylight([name]);
+    // Sync to Skylight immediately (independent of DB)
+    console.log('addItem: about to call syncToSkylight for', name);
+    syncToSkylight([name]).then(() => {
+        console.log('addItem: syncToSkylight completed for', name);
+    }).catch(err => {
+        console.error('addItem: syncToSkylight failed for', name, err);
+    });
 
     if (window.supabase && state.currentUser && state.currentList?.id) {
         await addItemToDatabase(newItem);
