@@ -1628,8 +1628,7 @@ async function syncFromSkylight() {
         }
 
         // Edge function didn't add anything — use debug.skylightAllItems to sync from frontend
-        const d = result.debug || {};
-        const allSkylightItems = d.skylightAllItems || [];
+        // (allSkylightItems already declared above for push dedup)
 
         console.log('Skylight items full data:', JSON.stringify(allSkylightItems.slice(0, 3), null, 2));
 
