@@ -1407,6 +1407,9 @@ async function addItem() {
         created_at: new Date().toISOString()
     };
 
+    // Sync to Skylight immediately (fire-and-forget, independent of DB)
+    syncToSkylight([name]);
+
     if (window.supabase && state.currentUser && state.currentList?.id) {
         await addItemToDatabase(newItem);
     } else {
@@ -1469,27 +1472,6 @@ async function addItemToDatabase(item) {
         }
         renderItems();
         saveToLocalStorage();
-
-        // Push to Skylight immediately after successful DB insert
-        // (same pattern as deleteFromSkylight which works reliably)
-        console.log('addItemToDatabase: pushing to Skylight:', item.name);
-        try {
-            const skyRes = await fetch(
-                'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight',
-                {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                    },
-                    body: JSON.stringify({ items: [item.name] })
-                }
-            );
-            const skyResult = await skyRes.json();
-            console.log('addItemToDatabase: Skylight push response:', skyRes.status, JSON.stringify(skyResult));
-        } catch (skyErr) {
-            console.error('addItemToDatabase: Skylight push failed:', skyErr);
-        }
 
         return true;
 
@@ -1555,19 +1537,20 @@ async function syncToSkylight(items) {
 
 /**
  * Two-way sync with Skylight Calendar grocery list:
- * 1) Push unchecked app items TO Skylight
- * 2) Pull new Skylight items INTO app
- * 3) Remove app items that were checked off / deleted on Skylight
+ * 1) Pull new Skylight items INTO app (+ remove checked-off items)
+ * 2) Push unchecked app items TO Skylight (deduped against what's already there)
  */
 async function syncFromSkylight() {
     const statusEl = elements.skylightSyncStatus;
     const btn = elements.syncFromSkylightBtn;
 
     if (!state.currentUser) {
+        showToast('Please sign in first', 'error');
         return;
     }
 
     if (!window.supabase || !state.currentList?.id) {
+        showToast('Not connected to database', 'error');
         return;
     }
 
@@ -1582,7 +1565,7 @@ async function syncFromSkylight() {
     btn.disabled = true;
     btn.textContent = '⏳ Syncing...';
     statusEl.classList.remove('hidden');
-    statusEl.textContent = 'Pushing items to Skylight...';
+    statusEl.textContent = 'Pulling updates from Skylight...';
     statusEl.className = 'sync-status';
 
     try {
@@ -1604,15 +1587,25 @@ async function syncFromSkylight() {
         const result = await response.json();
         console.log('Skylight sync result:', JSON.stringify(result, null, 2));
 
-        // --- Step 2: Push ALL unchecked app items TO Skylight ---
-        // Edge function v6 has no dedup — just pushes directly. Skylight can handle duplicates.
-        statusEl.textContent = 'Pushing items to Skylight...';
+        // Build set of items already in Skylight (from pull response) to avoid push duplicates
+        const skylightNames = new Set();
+        const allSkylightItems = result.debug?.skylightAllItems || [];
+        for (const si of allSkylightItems) {
+            const label = (si.label || '').toLowerCase().trim();
+            if (label) skylightNames.add(label);
+        }
+        console.log(`Skylight has ${skylightNames.size} items, used for push dedup`);
+
+        // --- Step 2: Push unchecked app items TO Skylight (only items not already there) ---
+        statusEl.textContent = 'Pushing new items to Skylight...';
         const uncheckedItems = state.items.filter(i => !i.is_checked);
-        const itemsToPush = uncheckedItems.map(i => i.name);
+        const itemsToPush = uncheckedItems
+            .map(i => i.name)
+            .filter(name => !skylightNames.has(name.toLowerCase().trim()));
         let pushedCount = 0;
 
         if (itemsToPush.length > 0) {
-            console.log(`Pushing ${itemsToPush.length} items to Skylight:`, itemsToPush);
+            console.log(`Pushing ${itemsToPush.length} new items to Skylight (skipped ${uncheckedItems.length - itemsToPush.length} already there)`);
             try {
                 const pushResponse = await fetch(
                     'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight',
@@ -1633,6 +1626,8 @@ async function syncFromSkylight() {
             } catch (pushError) {
                 console.error('Push to Skylight failed:', pushError);
             }
+        } else {
+            console.log(`All ${uncheckedItems.length} unchecked items already in Skylight, nothing to push`);
         }
 
         // If the edge function already added/removed items, use that result
@@ -1660,8 +1655,6 @@ async function syncFromSkylight() {
         }
 
         // Edge function didn't add anything — use debug.skylightAllItems to sync from frontend
-        // (allSkylightItems already declared above for push dedup)
-
         console.log('Skylight items full data:', JSON.stringify(allSkylightItems.slice(0, 3), null, 2));
 
         if (allSkylightItems.length === 0) {

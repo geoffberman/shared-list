@@ -1,5 +1,5 @@
 // Service Worker for Shared List Grocery App
-const CACHE_NAME = 'shared-list-v11';
+const CACHE_NAME = 'shared-list-v12';
 const STATIC_ASSETS = [
     './',
     './index.html',
