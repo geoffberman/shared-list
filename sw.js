@@ -1,5 +1,5 @@
 // Service Worker for Shared List Grocery App
-const CACHE_NAME = 'shared-list-v10';
+const CACHE_NAME = 'shared-list-v11';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -41,6 +41,9 @@ self.addEventListener('fetch', (event) => {
 
     // Skip non-GET requests
     if (request.method !== 'GET') return;
+
+    // Skip non-http(s) schemes (chrome-extension://, etc.)
+    if (!url.protocol.startsWith('http')) return;
 
     // Network-first for Supabase API calls
     if (url.hostname.includes('supabase')) {

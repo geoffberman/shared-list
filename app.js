@@ -1,6 +1,6 @@
 // Family Grocery List App
 // Collaborative grocery list with smart features
-const APP_VERSION = 'v10-auto-skylight-push';
+const APP_VERSION = 'v11-push-inside-addItemToDatabase';
 console.log('App version:', APP_VERSION);
 
 // ============================================================================
@@ -1416,9 +1416,6 @@ async function addItem() {
         renderItems();
     }
 
-    // Push this item to Skylight — same pattern as deleteFromSkylight (which works)
-    syncToSkylight([name]);
-
     // Clear inputs
     elements.itemInput.value = '';
     elements.quantityInput.value = '';
@@ -1472,6 +1469,27 @@ async function addItemToDatabase(item) {
         }
         renderItems();
         saveToLocalStorage();
+
+        // Push to Skylight immediately after successful DB insert
+        // (same pattern as deleteFromSkylight which works reliably)
+        console.log('addItemToDatabase: pushing to Skylight:', item.name);
+        try {
+            const skyRes = await fetch(
+                'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight',
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                    },
+                    body: JSON.stringify({ items: [item.name] })
+                }
+            );
+            const skyResult = await skyRes.json();
+            console.log('addItemToDatabase: Skylight push response:', skyRes.status, JSON.stringify(skyResult));
+        } catch (skyErr) {
+            console.error('addItemToDatabase: Skylight push failed:', skyErr);
+        }
 
         return true;
 
