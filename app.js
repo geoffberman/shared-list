@@ -1407,8 +1407,8 @@ async function addItem() {
         created_at: new Date().toISOString()
     };
 
-    // Sync to Skylight immediately (fire-and-forget, independent of DB)
-    syncToSkylight([name]);
+    // Sync to Skylight immediately (independent of DB)
+    await syncToSkylight([name]);
 
     if (window.supabase && state.currentUser && state.currentList?.id) {
         await addItemToDatabase(newItem);
@@ -1565,12 +1565,15 @@ async function syncFromSkylight() {
     btn.disabled = true;
     btn.textContent = '⏳ Syncing...';
     statusEl.classList.remove('hidden');
-    statusEl.textContent = 'Pulling updates from Skylight...';
+    statusEl.textContent = 'Syncing with Skylight...';
     statusEl.className = 'sync-status';
 
     try {
-        // --- Step 1: Pull from Skylight (adds new items + removes checked-off items) ---
-        statusEl.textContent = 'Pulling updates from Skylight...';
+        // The edge function now handles full two-way sync:
+        // 1) Push app-only items to Skylight
+        // 2) Pull new Skylight items into app
+        // 3) Delete sync (safe because push runs first)
+        statusEl.textContent = 'Syncing with Skylight...';
 
         const response = await fetch(
             'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-from-skylight',
@@ -1587,54 +1590,10 @@ async function syncFromSkylight() {
         const result = await response.json();
         console.log('Skylight sync result:', JSON.stringify(result, null, 2));
 
-        // Build set of items already in Skylight (from pull response) to avoid push duplicates
-        const skylightNames = new Set();
-        const allSkylightItems = result.debug?.skylightAllItems || [];
-        for (const si of allSkylightItems) {
-            const label = (si.label || '').toLowerCase().trim();
-            if (label) skylightNames.add(label);
-        }
-        console.log(`Skylight has ${skylightNames.size} items, used for push dedup`);
-
-        // --- Step 2: Push unchecked app items TO Skylight (only items not already there) ---
-        statusEl.textContent = 'Pushing new items to Skylight...';
-        const uncheckedItems = state.items.filter(i => !i.is_checked);
-        const itemsToPush = uncheckedItems
-            .map(i => i.name)
-            .filter(name => !skylightNames.has(name.toLowerCase().trim()));
-        let pushedCount = 0;
-
-        if (itemsToPush.length > 0) {
-            console.log(`Pushing ${itemsToPush.length} new items to Skylight (skipped ${uncheckedItems.length - itemsToPush.length} already there)`);
-            try {
-                const pushResponse = await fetch(
-                    'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight',
-                    {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                        },
-                        body: JSON.stringify({ items: itemsToPush })
-                    }
-                );
-                const pushResult = await pushResponse.json();
-                console.log('Push to Skylight result:', JSON.stringify(pushResult));
-                if (pushResult.results) {
-                    pushedCount = pushResult.results.filter(r => r.success).length;
-                }
-            } catch (pushError) {
-                console.error('Push to Skylight failed:', pushError);
-            }
-        } else {
-            console.log(`All ${uncheckedItems.length} unchecked items already in Skylight, nothing to push`);
-        }
-
-        // If the edge function already added/removed items, use that result
         if (response.ok && result.success) {
             const parts = [];
-            if (pushedCount > 0) {
-                parts.push(`Pushed ${pushedCount} to Skylight`);
+            if (result.pushed > 0) {
+                parts.push(`Pushed ${result.pushed} to Skylight`);
             }
             if (result.added > 0) {
                 parts.push(`Added ${result.added}: ${result.items.join(', ')}`);
@@ -1654,80 +1613,11 @@ async function syncFromSkylight() {
             return;
         }
 
-        // Edge function didn't add anything — use debug.skylightAllItems to sync from frontend
-        console.log('Skylight items full data:', JSON.stringify(allSkylightItems.slice(0, 3), null, 2));
-
-        if (allSkylightItems.length === 0) {
-            const parts = [];
-            if (pushedCount > 0) parts.push(`Pushed ${pushedCount} to Skylight`);
-            parts.push('No items found in Skylight');
-            statusEl.textContent = parts.join(' | ');
-            statusEl.className = 'sync-status success';
-            return;
-        }
-
-        const activeItems = allSkylightItems.filter(i => i.status !== 'complete');
-        const itemsToSync = activeItems.length > 0 ? activeItems : allSkylightItems;
-        const usedFilter = activeItems.length > 0;
-
-        statusEl.textContent = `Found ${allSkylightItems.length} Skylight items${usedFilter ? ` (${activeItems.length} active)` : ''}, checking for new ones...`;
-
-        // Get all existing items in the current list (checked + unchecked)
-        const { data: existingItems } = await window.supabase
-            .from('grocery_items')
-            .select('name')
-            .eq('list_id', state.currentList.id);
-
-        const existingNames = new Set(
-            (existingItems || []).map(i => i.name.toLowerCase().trim())
-        );
-
-        // Find items in Skylight that aren't in our app
-        const newItems = itemsToSync
-            .map(i => i.label)
-            .filter(label => label && !existingNames.has(label.toLowerCase().trim()));
-
-        // Insert new items directly via supabase
-        const addedNames = [];
-        for (const name of newItems) {
-            const { error } = await window.supabase
-                .from('grocery_items')
-                .insert({
-                    list_id: state.currentList.id,
-                    name: name,
-                    category: autoCategorize(name),
-                    is_checked: false,
-                    added_by: state.currentUser.id,
-                    notes: 'From Skylight',
-                });
-
-            if (!error) {
-                addedNames.push(name);
-            } else if (error.code !== '23505') {
-                console.error(`Failed to insert ${name}:`, error.message);
-            }
-        }
-
-        if (addedNames.length > 0) {
-            await window.supabase
-                .from('grocery_lists')
-                .update({ updated_at: new Date().toISOString() })
-                .eq('id', state.currentList.id);
-        }
-
-        const parts = [];
-        if (pushedCount > 0) parts.push(`Pushed ${pushedCount} to Skylight`);
-        if (addedNames.length > 0) parts.push(`Added ${addedNames.length}: ${addedNames.join(', ')}`);
-
-        if (parts.length > 0) {
-            statusEl.textContent = `✅ ${parts.join(' | ')}`;
-            statusEl.className = 'sync-status success';
-            showToast('Synced with Skylight', 'success');
-            await loadFromDatabase();
-        } else {
-            statusEl.textContent = '✅ Everything in sync with Skylight';
-            statusEl.className = 'sync-status success';
-        }
+        // Edge function returned an error
+        console.error('Skylight sync error:', result.error, result.details);
+        statusEl.textContent = `❌ ${result.error || 'Sync failed'}`;
+        statusEl.className = 'sync-status error';
+        showToast(result.error || 'Sync failed', 'error');
     } catch (error) {
         console.error('Sync with Skylight failed:', error);
         statusEl.textContent = '❌ Connection error';
