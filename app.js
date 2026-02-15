@@ -1,5 +1,7 @@
 // Family Grocery List App
 // Collaborative grocery list with smart features
+const APP_VERSION = 'v10-auto-skylight-push';
+console.log('App version:', APP_VERSION);
 
 // ============================================================================
 // STATE MANAGEMENT
