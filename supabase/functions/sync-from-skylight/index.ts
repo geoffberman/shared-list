@@ -1,7 +1,7 @@
 // Supabase Edge Function: sync-from-skylight
 // Pulls items from Skylight Calendar grocery list and adds them to the web app
 // Can be called manually via button or by scheduled cron job
-const FUNCTION_VERSION = "v3-no-status-filter";
+const FUNCTION_VERSION = "v4-bidirectional";
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -250,9 +250,52 @@ Deno.serve(async (req: Request) => {
     );
     debug.newItemsToAdd = newItems.map(i => i.attributes?.label);
 
+    // --- Push app items to Skylight BEFORE delete sync ---
+    // Items added in the app but not yet on Skylight need to be pushed first,
+    // otherwise the delete sync below would incorrectly remove them.
+    const { data: allUncheckedForPush } = await supabase
+      .from("grocery_items")
+      .select("name")
+      .eq("list_id", activeList.id)
+      .eq("is_checked", false);
+
+    const itemsToPush = (allUncheckedForPush || [])
+      .map((i) => i.name)
+      .filter((name) => !allSkylightNames.has(name.toLowerCase().trim()));
+
+    let pushedCount = 0;
+    const pushedNames: string[] = [];
+    if (itemsToPush.length > 0) {
+      console.log(`Pushing ${itemsToPush.length} app items to Skylight:`, itemsToPush);
+      for (const name of itemsToPush) {
+        try {
+          const addRes = await fetch(
+            `${SKYLIGHT_BASE_URL}/api/frames/${frameId}/lists/${groceryList.id}/list_items`,
+            {
+              method: "POST",
+              headers: auth.headers,
+              body: JSON.stringify({ label: name }),
+            }
+          );
+          if (addRes.ok) {
+            pushedCount++;
+            pushedNames.push(name);
+            // Mark as known to Skylight so delete sync won't remove it
+            allSkylightNames.add(name.toLowerCase().trim());
+          } else {
+            console.error(`Failed to push "${name}" to Skylight: ${addRes.status}`);
+          }
+        } catch (err) {
+          console.error(`Error pushing "${name}" to Skylight:`, err);
+        }
+      }
+      console.log(`Pushed ${pushedCount}/${itemsToPush.length} items to Skylight`);
+    }
+    debug.pushedToSkylight = pushedNames;
+    debug.pushedCount = pushedCount;
+
     // Delete sync: remove unchecked items from app that no longer exist on Skylight.
-    // This handles items checked off / deleted on the Skylight device — regardless of
-    // whether the item originally came from Skylight or was added in the app.
+    // This is safe now because app-only items were pushed to Skylight above.
     const { data: allUncheckedItems } = await supabase
       .from("grocery_items")
       .select("id, name")
@@ -278,13 +321,14 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    if (newItems.length === 0 && removedCount === 0) {
+    if (newItems.length === 0 && removedCount === 0 && pushedCount === 0) {
       return new Response(
         JSON.stringify({
           success: true,
           message: "All Skylight items already in your list",
           added: 0,
           removed: 0,
+          pushed: 0,
           skylightTotal: incompleteItems.length,
           debug,
         }),
@@ -330,6 +374,9 @@ Deno.serve(async (req: Request) => {
       .eq("id", activeList.id);
 
     const parts: string[] = [];
+    if (pushedCount > 0) {
+      parts.push(`Pushed ${pushedCount} item${pushedCount !== 1 ? "s" : ""} to Skylight`);
+    }
     if (addedNames.length > 0) {
       parts.push(`Added ${addedNames.length} item${addedNames.length !== 1 ? "s" : ""}`);
     }
@@ -345,6 +392,8 @@ Deno.serve(async (req: Request) => {
         items: addedNames,
         removed: removedCount,
         removedItems: removedNames,
+        pushed: pushedCount,
+        pushedItems: pushedNames,
         skylightTotal: incompleteItems.length,
         debug,
       }),
