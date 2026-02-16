@@ -1,6 +1,6 @@
 // Family Grocery List App
 // Collaborative grocery list with smart features
-const APP_VERSION = 'v11-push-inside-addItemToDatabase';
+const APP_VERSION = 'v12-skylight-push-before-db';
 console.log('App version:', APP_VERSION);
 
 // ============================================================================
