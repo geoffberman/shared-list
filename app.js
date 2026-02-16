@@ -1,6 +1,6 @@
 // Family Grocery List App
 // Collaborative grocery list with smart features
-const APP_VERSION = 'v13-skylight-push-all-paths';
+const APP_VERSION = 'v14-frequent-item-debug';
 console.log('App version:', APP_VERSION);
 
 // ============================================================================
@@ -1888,6 +1888,7 @@ async function saveInlineNotes(itemId) {
 }
 
 async function addFrequentItem(itemName, category, quantity) {
+    console.log('[FREQUENT ITEM] Adding:', itemName);
     // Check if already in list
     if (state.items.find(i => i.name.toLowerCase() === itemName.toLowerCase())) {
         showToast(`"${itemName}" is already in your list`, 'warning');
@@ -1904,6 +1905,7 @@ async function addFrequentItem(itemName, category, quantity) {
     };
 
     // Sync to Skylight immediately (independent of DB)
+    console.log('[FREQUENT ITEM] Calling syncToSkylight for:', itemName);
     await syncToSkylight([itemName]);
 
     if (window.supabase && state.currentUser && state.currentList?.id) {
@@ -2608,12 +2610,12 @@ function renderFrequentItems() {
 
     // Add event listeners
     document.querySelectorAll('.frequent-item-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
+        btn.addEventListener('click', async (e) => {
             const target = e.target.closest('.frequent-item-btn');
             const name = target.dataset.name;
             const category = target.dataset.category;
             const quantity = target.dataset.quantity;
-            addFrequentItem(name, category, quantity);
+            await addFrequentItem(name, category, quantity);
         });
     });
 }
