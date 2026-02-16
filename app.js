@@ -1,6 +1,6 @@
 // Family Grocery List App
 // Collaborative grocery list with smart features
-const APP_VERSION = 'v12-skylight-push-before-db';
+const APP_VERSION = 'v13-skylight-push-all-paths';
 console.log('App version:', APP_VERSION);
 
 // ============================================================================
@@ -1339,6 +1339,7 @@ async function addCommonItems() {
     }
 
     let addedCount = 0;
+    const addedNames = [];
 
     for (const commonItem of itemsToAdd) {
         // Skip if already on list
@@ -1361,7 +1362,13 @@ async function addCommonItems() {
             newItem.id = Date.now() + Math.random();
             state.items.push(newItem);
         }
+        addedNames.push(commonItem.name);
         addedCount++;
+    }
+
+    // Sync all added items to Skylight in one batch
+    if (addedNames.length > 0) {
+        await syncToSkylight(addedNames);
     }
 
     if (addedCount === 0) {
@@ -1895,6 +1902,9 @@ async function addFrequentItem(itemName, category, quantity) {
         is_checked: false,
         created_at: new Date().toISOString()
     };
+
+    // Sync to Skylight immediately (independent of DB)
+    await syncToSkylight([itemName]);
 
     if (window.supabase && state.currentUser && state.currentList?.id) {
         await addItemToDatabase(newItem);
