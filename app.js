@@ -1,6 +1,6 @@
 // Family Grocery List App
 // Collaborative grocery list with smart features
-const APP_VERSION = 'v15-checkoff-skylight-fix';
+const APP_VERSION = 'v16-uncheck-resync';
 console.log('App version:', APP_VERSION);
 
 // ============================================================================
@@ -1679,10 +1679,15 @@ async function toggleItem(itemId) {
 
     renderItems();
 
-    // Sync check-off to Skylight (mark as complete = remove from active list)
-    if (item.is_checked && item.name) {
-        console.log('[TOGGLE] Item checked off, deleting from Skylight:', item.name);
-        await deleteFromSkylight(item.name);
+    // Sync check/uncheck to Skylight
+    if (item.name) {
+        if (item.is_checked) {
+            console.log('[TOGGLE] Item checked off, deleting from Skylight:', item.name);
+            await deleteFromSkylight(item.name);
+        } else {
+            console.log('[TOGGLE] Item unchecked, re-adding to Skylight:', item.name);
+            await syncToSkylight([item.name]);
+        }
     }
 }
 
