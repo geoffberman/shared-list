@@ -1,7 +1,7 @@
 // Supabase Edge Function: sync-from-skylight
 // Pulls items from Skylight Calendar grocery list and adds them to the web app
 // Can be called manually via button or by scheduled cron job
-const FUNCTION_VERSION = "v4-bidirectional";
+const FUNCTION_VERSION = "v5-delete-checked";
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -294,15 +294,16 @@ Deno.serve(async (req: Request) => {
     debug.pushedToSkylight = pushedNames;
     debug.pushedCount = pushedCount;
 
-    // Delete sync: remove unchecked items from app that no longer exist on Skylight.
-    // This is safe now because app-only items were pushed to Skylight above.
-    const { data: allUncheckedItems } = await supabase
+    // Delete sync: remove items from app that no longer exist on Skylight.
+    // This covers both:
+    //   - Unchecked items removed from Skylight externally (safe because app-only items were pushed above)
+    //   - Checked items that were deleted from Skylight when checked off in the app
+    const { data: allAppItems } = await supabase
       .from("grocery_items")
-      .select("id, name")
-      .eq("list_id", activeList.id)
-      .eq("is_checked", false);
+      .select("id, name, is_checked")
+      .eq("list_id", activeList.id);
 
-    const itemsToDelete = (allUncheckedItems || []).filter(
+    const itemsToDelete = (allAppItems || []).filter(
       (item) => !allSkylightNames.has(item.name.toLowerCase().trim())
     );
 
