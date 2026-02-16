@@ -325,6 +325,7 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           success: true,
+          version: FUNCTION_VERSION,
           message: "All Skylight items already in your list",
           added: 0,
           removed: 0,
@@ -387,6 +388,7 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         success: true,
+        version: FUNCTION_VERSION,
         message: parts.join(", "),
         added: addedNames.length,
         items: addedNames,

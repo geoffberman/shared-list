@@ -1505,10 +1505,10 @@ function setupScheduledSync() {
 async function syncToSkylight(items) {
     if (!items || items.length === 0) return;
 
-    try {
-        const itemNames = items.map(i => typeof i === 'string' ? i : i.name);
-        console.log('syncToSkylight: calling edge function with', itemNames);
+    const itemNames = items.map(i => typeof i === 'string' ? i : i.name);
+    console.log('[SKYLIGHT PUSH] Starting push for:', itemNames);
 
+    try {
         const response = await fetch(
             'https://ilinxxocqvgncglwbvom.supabase.co/functions/v1/sync-skylight',
             {
@@ -1522,23 +1522,25 @@ async function syncToSkylight(items) {
         );
 
         const result = await response.json();
-        console.log('Skylight sync response:', response.status, JSON.stringify(result, null, 2));
+        console.log('[SKYLIGHT PUSH] Response:', response.status, JSON.stringify(result, null, 2));
+
         if (!response.ok) {
-            console.error('Skylight sync error:', result.error, result.details);
-            showToast(`Skylight sync error: ${result.error || response.status}`, 'error');
+            console.error('[SKYLIGHT PUSH] HTTP error:', response.status, result);
+            showToast(`Skylight push error: ${result.error || response.status}`, 'error');
         } else {
             // Check individual item results for failures
             const failed = (result.results || []).filter(r => !r.success);
             if (failed.length > 0) {
-                console.error('Skylight push failures:', failed);
-                showToast(`Skylight: ${failed.length} item(s) failed to push - ${failed.map(f => f.error).join(', ')}`, 'error');
+                console.error('[SKYLIGHT PUSH] Item failures:', failed);
+                showToast(`Skylight push failed: ${failed.map(f => f.error).join(', ')}`, 'error');
             } else {
-                console.log('Skylight push OK, version:', result.version, 'message:', result.message);
+                console.log('[SKYLIGHT PUSH] Success! Version:', result.version);
+                showToast(`Pushed to Skylight (${result.version || '?'})`, 'success');
             }
         }
     } catch (error) {
-        console.error('Skylight sync failed:', error);
-        showToast('Skylight sync failed: ' + error.message, 'error');
+        console.error('[SKYLIGHT PUSH] Network error:', error);
+        showToast('Skylight push failed: ' + error.message, 'error');
     }
 }
 
@@ -1595,7 +1597,12 @@ async function syncFromSkylight() {
         );
 
         const result = await response.json();
-        console.log('Skylight sync result:', JSON.stringify(result, null, 2));
+        console.log('[SKYLIGHT SYNC] Result:', JSON.stringify(result, null, 2));
+        if (result.debug) {
+            console.log('[SKYLIGHT SYNC] Debug - app items:', result.debug.existingUncheckedNames);
+            console.log('[SKYLIGHT SYNC] Debug - skylight items:', result.debug.incompleteItems);
+            console.log('[SKYLIGHT SYNC] Debug - items to push:', result.debug.pushedToSkylight);
+        }
 
         if (response.ok && result.success) {
             const parts = [];
