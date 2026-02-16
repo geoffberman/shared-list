@@ -1522,12 +1522,19 @@ async function syncToSkylight(items) {
         );
 
         const result = await response.json();
-        console.log('Skylight sync response:', response.status, JSON.stringify(result));
+        console.log('Skylight sync response:', response.status, JSON.stringify(result, null, 2));
         if (!response.ok) {
             console.error('Skylight sync error:', result.error, result.details);
             showToast(`Skylight sync error: ${result.error || response.status}`, 'error');
-        } else if (result.version) {
-            console.log('Skylight function version:', result.version);
+        } else {
+            // Check individual item results for failures
+            const failed = (result.results || []).filter(r => !r.success);
+            if (failed.length > 0) {
+                console.error('Skylight push failures:', failed);
+                showToast(`Skylight: ${failed.length} item(s) failed to push - ${failed.map(f => f.error).join(', ')}`, 'error');
+            } else {
+                console.log('Skylight push OK, version:', result.version, 'message:', result.message);
+            }
         }
     } catch (error) {
         console.error('Skylight sync failed:', error);
@@ -1606,7 +1613,7 @@ async function syncFromSkylight() {
                 statusEl.className = 'sync-status success';
                 showToast('Synced with Skylight', 'success');
             } else {
-                statusEl.textContent = '✅ Everything in sync with Skylight';
+                statusEl.textContent = `✅ Everything in sync with Skylight (${result.version || 'unknown'})`;
                 statusEl.className = 'sync-status success';
             }
             await loadFromDatabase();
