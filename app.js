@@ -1,6 +1,6 @@
 // Family Grocery List App
 // Collaborative grocery list with smart features
-const APP_VERSION = 'v16-uncheck-resync';
+const APP_VERSION = 'v17-uncheck-resync-fix';
 console.log('App version:', APP_VERSION);
 
 // ============================================================================
@@ -1686,7 +1686,11 @@ async function toggleItem(itemId) {
             await deleteFromSkylight(item.name);
         } else {
             console.log('[TOGGLE] Item unchecked, re-adding to Skylight:', item.name);
-            await syncToSkylight([item.name]);
+            try {
+                await syncToSkylight([item.name]);
+            } catch (err) {
+                console.error('[TOGGLE] Failed to re-add to Skylight:', err);
+            }
         }
     }
 }
